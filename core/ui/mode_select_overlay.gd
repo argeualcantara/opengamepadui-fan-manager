@@ -12,13 +12,9 @@ class_name ModeSelectOverlay
 ## reported minimum size, not by anchors. The previous OverlayProvider
 ## version relied on anchor-based centering meant for a full-screen
 ## OverlayContainer, which --overlay-mode's scene doesn't even have.
-## HeaderRow (the "Fan Manager" title) sits directly under this root,
-## outside the scrollable area, so it's always visible; everything from
-## NoBackendLabel down lives inside the child `ScrollArea`
-## (ScrollContainer) > `ScrollContent` (VBoxContainer). ScrollArea caps
-## how tall the card is allowed to grow (MAX_PANEL_HEIGHT) and scrolls
-## internally past that, instead of the whole Quick Bar ballooning to
-## fit Custom Mode's 10 sliders. See _update_scroll_cap().
+## No internal ScrollContainer either (tried, reverted): every child
+## sits flat, directly under this root, one below the other. The Quick
+## Bar's own outer viewport already scrolls the whole card list.
 ##
 ## FanModeManager/ProfileManagerPanel/GameCurveManager/
 ## CustomCurveEditor/FanTabButton below are referenced via preload()'d
@@ -44,23 +40,14 @@ const MODE_LABELS := {
 	"custom": "Custom Mode",
 }
 
-## Tallest the card is allowed to grow before it scrolls internally
-## instead of pushing the rest of the Quick Bar down (mainly hit in
-## Custom Mode, once the 10 TemperatureSliderRow instances and, when
-## the backend reports more than one fan, FanTabsBar are all visible).
-const MAX_PANEL_HEIGHT := 420.0
-
 var mode_manager: FanModeManager
 
 var logger := Log.get_logger("ModeSelectOverlay")
 
-@onready var scroll_area := $%ScrollArea as ScrollContainer
-@onready var scroll_content := $%ScrollContent as VBoxContainer
 @onready var focus_group := $%FocusGroup as FocusGroup
 @onready var mode_dropdown := $%ModeDropdown as Dropdown
 @onready var error_label := $%ErrorLabel as Label
 @onready var no_backend_label := $%NoBackendLabel as Label
-@onready var mode_list := $%ModeList as Control
 @onready var custom_editor_slot := $%CustomEditorSlot as Control
 @onready var fan_tabs_bar := $%FanTabsBar as HBoxContainer
 @onready var editors_container := $%EditorsContainer as Control
@@ -91,11 +78,10 @@ func _ready() -> void:
 
 	if not mode_manager or not mode_manager.backend:
 		logger.warn("No FanModeManager/backend available; showing empty state")
-		mode_list.visible = false
+		mode_dropdown.visible = false
 		per_game_toggle.visible = false
 		apply_button.visible = false
 		no_backend_label.visible = true
-		_update_scroll_cap.call_deferred()
 		return
 
 	no_backend_label.visible = false
@@ -108,31 +94,6 @@ func _ready() -> void:
 	_select_dropdown_for_mode(mode_manager.current_mode)
 
 	focus_group.grab_focus.call_deferred()
-	_update_scroll_cap.call_deferred()
-	_wire_dropdown_exit_focus.call_deferred()
-
-
-## The only cross-boundary focus link that can't be set declaratively
-## in the .tscn: ModeList's FocusGroup treats ModeDropdown as its sole
-## child, so its own _ready() (already run by the time ours runs)
-## unconditionally overwrites ModeDropdown's focus_neighbor_* to point
-## to itself on all 4 sides (FocusGroup._single_set_focus_tree()) —
-## any NodePath set on it in the .tscn is clobbered the same way.
-## Dropdown then proxies focus_neighbor_bottom to its internal
-## OptionButton once, in Dropdown._ready() (also already run): setting
-## mode_dropdown.focus_neighbor_bottom here would land on the outer
-## wrapper, too late to matter, so this goes through
-## mode_dropdown.option_button directly instead.
-##
-## Must be called deferred (see the call site in _ready()): PackedScene
-## .instantiate() runs _ready() on the whole subtree immediately, before
-## plugin.gd's add_to_quick_bar() has attached it to the live tree, and
-## get_path_to() below hard-errors ("not inside tree") when called
-## before that attachment happens. Same reason focus_group.grab_focus
-## and _update_scroll_cap are already deferred here too.
-func _wire_dropdown_exit_focus() -> void:
-	var dropdown_option := mode_dropdown.option_button
-	dropdown_option.focus_neighbor_bottom = dropdown_option.get_path_to(per_game_toggle)
 
 
 ## Builds the dropdown items in MODE_LABELS order, skipping "OS Mode"
@@ -213,7 +174,6 @@ func _select_dropdown_for_mode(mode: String) -> void:
 
 	if mode != "custom":
 		dirty_badge.visible = false
-		_update_scroll_cap.call_deferred()
 		return
 
 	_ensure_fan_editors()
@@ -224,21 +184,6 @@ func _select_dropdown_for_mode(mode: String) -> void:
 			(_fan_editors[fan_id] as CustomCurveEditor).bind_engine(engines[fan_id])
 
 	profiles_panel.refresh(mode_manager.store, mode_manager.hardware_id, engines)
-	_update_scroll_cap.call_deferred()
-
-
-## Recomputes how tall ScrollContent naturally wants to be (after
-## whatever visibility/child changes the caller just made land in a
-## layout pass, hence call_deferred() at every call site instead of
-## calling this directly) and caps ScrollArea's own minimum size at
-## MAX_PANEL_HEIGHT. Below the cap this just tracks the content exactly
-## (no dead space, no scrollbar); at/above it the container stops
-## growing and the overflow scrolls instead, e.g. Custom Mode with
-## every slider visible. HeaderRow sits outside ScrollArea entirely, so
-## it's never affected by this cap.
-func _update_scroll_cap() -> void:
-	var natural_height := scroll_content.get_combined_minimum_size().y
-	scroll_area.custom_minimum_size.y = minf(natural_height, MAX_PANEL_HEIGHT)
 
 
 ## Builds one CustomCurveEditor per fan reported by the backend, and a
