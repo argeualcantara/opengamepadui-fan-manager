@@ -40,7 +40,7 @@ func detect() -> FanBackend:
 	)
 
 	for backend in _backends:
-		var backend_name := backend.get_script().get_global_name()
+		var backend_name: String = backend.get_script().get_global_name()
 		var supported := backend.is_supported()
 		logger.debug("Probed backend '%s': is_supported=%s" % [backend_name, supported])
 		if supported:

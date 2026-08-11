@@ -140,7 +140,7 @@ func delete_profile(hardware_id: String, name: String) -> bool:
 
 	profiles.erase(name)
 	data["profiles"] = profiles
-	var was_active := data.get("active_profile") == name
+	var was_active: bool = data.get("active_profile") == name
 	if was_active:
 		data["active_profile"] = null
 
