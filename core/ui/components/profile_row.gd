@@ -5,13 +5,10 @@ class_name ProfileRow
 ## mouse-only delete button. Selecting the row (click or ui_accept)
 ## loads that profile; the delete button removes it.
 ##
-## The delete button intentionally has focus_mode = FOCUS_NONE: v1
-## only supports deleting a profile by mouse/touch. Gamepad-only
-## deletion is a known gap, not covered by this activity's acceptance
-## criteria; see tasks/08-ui-perfis-salvar-carregar.md.
+## The delete button intentionally has focus_mode = FOCUS_NONE: deleting
+## a profile is only supported by mouse/touch, not gamepad, for now.
 ##
-## Follows the same focus-highlight tween pattern as
-## card_button.gd / mode_option_card.gd.
+## Follows the same focus-highlight tween pattern as card_button.gd.
 
 signal selected(profile_name: String)
 signal delete_requested(profile_name: String)
@@ -40,6 +37,8 @@ signal delete_requested(profile_name: String)
 var _tween: Tween
 
 
+## Syncs the label, wires focus/hover/theme signals, and forwards
+## delete_button.pressed into delete_requested.
 func _ready() -> void:
 	focus_mode = Control.FOCUS_ALL
 	name_label.text = profile_name
@@ -54,15 +53,15 @@ func _ready() -> void:
 	delete_button.pressed.connect(func(): delete_requested.emit(profile_name))
 
 
-## Mirrors card_button.gd: TextureRect.texture isn't a themed property
-## Godot applies automatically, so the "highlight" icon has to be
-## fetched and assigned manually (see mode_option_card.gd).
+## Fetches the "highlight" icon manually: TextureRect.texture isn't a
+## themed property Godot applies automatically (mirrors card_button.gd).
 func _on_theme_changed() -> void:
 	var highlight_texture := get_theme_icon("highlight", "CardButton")
 	if highlight_texture:
 		highlight.texture = highlight_texture
 
 
+## Emits selected on ui_accept or left-click; left-click also grabs focus.
 func _gui_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_accept"):
 		selected.emit(profile_name)
@@ -73,6 +72,7 @@ func _gui_input(event: InputEvent) -> void:
 			selected.emit(profile_name)
 
 
+## Signal handler for focus_entered/mouse_entered: fades the highlight in.
 func _on_focus() -> void:
 	if _tween:
 		_tween.kill()
@@ -82,6 +82,7 @@ func _on_focus() -> void:
 	_tween.tween_property(highlight, "modulate", Color(1, 1, 1, 1), highlight_speed)
 
 
+## Signal handler for focus_exited/mouse_exited: fades the highlight out.
 func _on_unfocus() -> void:
 	if _tween:
 		_tween.kill()

@@ -3,14 +3,11 @@ class_name TemperatureSliderRow
 
 ## A single focusable row in the custom curve editor: a temperature
 ## label, a percent "slider" (custom-drawn fill+thumb, not a native
-## HSlider: see tasks/07-ui-editor-curva-sliders.md), and a value
-## label. `ui_left`/`ui_right` step the value while focused; `ui_up`/
-## `ui_down` are left alone so the parent list can move focus between
-## rows (wired via CustomCurveEditor, not FocusGroup: this row isn't
-## a direct VBoxContainer child of a plain layout FocusGroup expects).
+## HSlider), and a value label. ui_left/ui_right step the value while
+## focused; ui_up/ui_down are left alone so CustomCurveEditor can wire
+## focus between rows itself.
 ##
-## Follows the same focus-highlight tween pattern as
-## core/ui/components/card_button.gd / mode_option_card.gd.
+## Follows the same focus-highlight tween pattern as card_button.gd.
 
 signal value_changed(temperature: int, percent: float)
 
@@ -35,6 +32,8 @@ var percent: float = 0.0
 var _tween: Tween
 
 
+## Syncs the label/fill to the current temperature/percent and wires
+## focus/hover/theme signals.
 func _ready() -> void:
 	focus_mode = Control.FOCUS_ALL
 	temp_label.text = "%d°C" % temperature
@@ -48,23 +47,23 @@ func _ready() -> void:
 	_on_theme_changed()
 
 
-## Mirrors card_button.gd: TextureRect.texture isn't a themed property
-## Godot applies automatically, so the "highlight" icon has to be
-## fetched and assigned manually (see mode_option_card.gd).
+## Fetches the "highlight" icon manually: TextureRect.texture isn't a
+## themed property Godot applies automatically (mirrors card_button.gd).
 func _on_theme_changed() -> void:
 	var highlight_texture := get_theme_icon("highlight", "CardButton")
 	if highlight_texture:
 		highlight.texture = highlight_texture
 
 
-## Sets the displayed value without emitting value_changed: used when
-## syncing from CustomCurveEngine.curve_changed (a programmatic update,
-## as opposed to the user directly interacting with this row).
+## Sets percent (clamped 0-100) and updates the visual, without
+## emitting value_changed: used for programmatic syncs (e.g. from
+## CustomCurveEngine.curve_changed), not user edits.
 func set_percent_silently(p: float) -> void:
 	percent = clampf(p, 0.0, 100.0)
 	_update_visual()
 
 
+## Redraws the value label and fill/thumb position from percent.
 func _update_visual() -> void:
 	value_label.text = "%d%%" % int(round(percent))
 	var fraction := percent / 100.0
@@ -73,6 +72,7 @@ func _update_visual() -> void:
 	thumb.anchor_right = fraction
 
 
+## ui_left/ui_right step the value by STEP; left-click grabs focus.
 func _gui_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_left"):
 		_step(-STEP)
@@ -85,12 +85,15 @@ func _gui_input(event: InputEvent) -> void:
 			grab_focus()
 
 
+## Adjusts percent by delta (clamped 0-100), updates the visual, and
+## emits value_changed.
 func _step(delta: float) -> void:
 	percent = clampf(percent + delta, 0.0, 100.0)
 	_update_visual()
 	value_changed.emit(temperature, percent)
 
 
+## Signal handler for focus_entered/mouse_entered: fades the highlight in.
 func _on_focus() -> void:
 	if _tween:
 		_tween.kill()
@@ -100,6 +103,7 @@ func _on_focus() -> void:
 	_tween.tween_property(highlight, "modulate", Color(1, 1, 1, 1), highlight_speed)
 
 
+## Signal handler for focus_exited/mouse_exited: fades the highlight out.
 func _on_unfocus() -> void:
 	if _tween:
 		_tween.kill()

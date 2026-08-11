@@ -1,16 +1,13 @@
 extends Node
 class_name FanModeManager
 
-## Orchestrates switching between BIOS, OS, and Custom fan modes
-## (REQUIREMENTS.md §2.2, §2.4): detects the active FanBackend, cleanly
-## stops whatever the previous mode was doing before applying the new
-## one, persists the active mode, and reapplies it automatically on
-## startup so the user never has to reconfigure after a restart.
+## Orchestrates switching between BIOS and Custom fan modes: detects
+## the active FanBackend, stops the previous mode's activity before
+## applying the new one, persists the active mode, and reapplies it on
+## startup.
 ##
-## FanBackendRegistry/FanCurveStore/CustomCurveEngine/FanBackend/
-## FanCurveUtils below are referenced via preload()'d consts, not bare
-## class_name lookups (see hwmon_fan_backend.gd's header comment /
-## tasks/17-fix-class-name-resolution-em-plugin-empacotado.md).
+## Referenced via preload()'d consts, not bare class_name lookups: see
+## hwmon_fan_backend.gd's header comment for why.
 const FanBackendRegistry = preload("res://plugins/fan-manager/core/backends/fan_backend_registry.gd")
 const FanCurveStore = preload("res://plugins/fan-manager/core/persistence/fan_curve_store.gd")
 const CustomCurveEngine = preload("res://plugins/fan-manager/core/engine/custom_curve_engine.gd")
@@ -27,9 +24,7 @@ var registry: FanBackendRegistry
 var store: FanCurveStore
 
 ## One CustomCurveEngine per fan_id, created lazily as fans are
-## discovered: a fixed count isn't known until the backend is
-## detected, so it can't be injected up front like the old single
-## engine was (tasks/14-suporte-multiplas-fans.md).
+## discovered.
 var curve_engines: Dictionary = {}
 
 var backend: FanBackend
@@ -51,9 +46,8 @@ func _ready() -> void:
 	hardware_id = backend.get_hardware_id()
 
 	if not store.exists(hardware_id):
-		# Genuinely first run for this hardware: nothing to reapply, so
-		# don't write pwm1_enable at all. Adopt whatever the hardware is
-		# already doing instead of imposing an assumed default.
+		# First run for this hardware: adopt whatever mode it's already
+		# in instead of writing an assumed default.
 		_adopt_current_hardware_mode()
 		return
 
@@ -75,12 +69,9 @@ func _adopt_current_hardware_mode() -> void:
 	current_mode = detected
 	_persist_active_mode(detected)
 
-	# Deliberately NOT _start_custom_mode() here: that path creates the
-	# built-in "Default" profile when none is set, which would
-	# overwrite whatever curve the hardware already had: exactly what
-	# this whole method exists to avoid. If the hardware was somehow
-	# already in custom mode before the plugin ever ran, read back
-	# whatever curve is actually active instead.
+	# Not _start_custom_mode(): that creates the built-in "Default"
+	# profile, overwriting the hardware's existing curve. Read back
+	# what's actually active instead.
 	if detected == "custom":
 		_adopt_current_custom_curve()
 
@@ -106,9 +97,7 @@ func set_mode(mode: String) -> bool:
 
 	var previous_mode := current_mode if not current_mode.is_empty() else "(none)"
 
-	# Stop whatever the previous mode was doing before touching the
-	# backend, so no state (e.g. custom-curve polling) leaks across
-	# the switch regardless of which mode we're leaving/entering.
+	# Stop the previous mode's activity before touching the backend.
 	for engine in curve_engines.values():
 		engine.stop()
 
@@ -145,8 +134,8 @@ func _ensure_curve_engine(fan_id: String) -> CustomCurveEngine:
 
 
 ## Applies a curve to every fan reported by the backend. A saved
-## profile bundles one curve per fan_id (tasks/14); each engine gets
-## only its own slice, kept fully independent of the others.
+## profile bundles one curve per fan_id; each engine gets only its own
+## slice.
 func _start_custom_mode() -> void:
 	var fans := backend.list_fans()
 	if fans.is_empty():
@@ -163,9 +152,7 @@ func _start_custom_mode() -> void:
 	var profile_name := ""
 
 	if active_profile != null and profiles.has(active_profile):
-		# Saved profiles are always already aligned to the UI's fixed
-		# 10-point grid: they were created by that same editor in the
-		# first place.
+		# Saved profiles are already aligned to the UI's fixed 10-point grid.
 		profile_curves = profiles[active_profile]
 		profile_name = active_profile
 	elif profiles.has(FanCurveUtils.DEFAULT_PROFILE_NAME):
@@ -177,10 +164,8 @@ func _start_custom_mode() -> void:
 			% [profile_name, hardware_id]
 		)
 	else:
-		# First time ever entering Custom Mode on this hardware with no
-		# profiles at all: create the built-in balanced default,
-		# applied identically to every fan, as a real, visible, editable
-		# profile (not just an ephemeral in-memory curve).
+		# No profiles yet: create the built-in balanced default,
+		# applied identically to every fan.
 		for fan_id in fans:
 			profile_curves[fan_id] = FanCurveUtils.DEFAULT_BALANCED_CURVE.duplicate()
 		profile_name = FanCurveUtils.DEFAULT_PROFILE_NAME
@@ -196,30 +181,18 @@ func _start_custom_mode() -> void:
 	for fan_id in fans:
 		var engine := _ensure_curve_engine(fan_id)
 
-		# Re-entering Custom Mode after switching away: reuse whatever
-		# is already in memory instead of reloading from disk, so
-		# unsaved edits survive a round trip through another mode
-		# (REQUIREMENTS.md §2.3 / tasks/07 acceptance criteria).
+		# Reuse in-memory curve on re-entry so unsaved edits survive a
+		# round trip through another mode.
 		var curve: Dictionary = engine.get_curve()
 		if curve.is_empty():
 			curve = profile_curves.get(fan_id, FanCurveUtils.DEFAULT_BALANCED_CURVE.duplicate())
 
-		# The engine is always the source of truth for the working
-		# curve (the UI editor reads/writes through it): whether it
-		# also polls continuously depends on
-		# backend.requires_software_polling(), and that decision lives
-		# inside CustomCurveEngine.start() itself.
 		engine.start(backend, fan_id, curve)
 
 
-## Only used by _adopt_current_hardware_mode() for the rare case the
-## hardware was already in custom mode before the plugin ever ran.
-## Reads back whatever curve is actually active per fan: does NOT
-## create/use the "Default" profile (that's for a deliberate switch
-## into Custom Mode, see _start_custom_mode()), so it doesn't overwrite
-## it with an assumption. Note this still writes the curve-point
-## registers back (an approximation of what's already there, since it
-## round-trips through resampling): it just never touches pwm_enable.
+## Used by _adopt_current_hardware_mode() when the hardware was already
+## in custom mode before the plugin ran. Reads back the curve actually
+## active per fan, without creating/using the "Default" profile.
 func _adopt_current_custom_curve() -> void:
 	var fans := backend.list_fans()
 	if fans.is_empty():

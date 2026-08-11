@@ -2,29 +2,22 @@ extends Node
 class_name CustomCurveEngine
 
 ## Tracks the curve being edited (the "draft") separately from the
-## curve actually applied to hardware (the "committed" curve) for a
-## single fan: REQUIREMENTS.md §2.3, §4.
+## curve applied to hardware (the "committed" curve), for a single fan
+## (one engine instance per fan_id; ModeSelectOverlay owns one per
+## fan).
 ##
-## Dragging a slider (set_point()) only ever touches the draft: it
-## updates the in-memory value, enforces the "no decreasing curve"
-## rule, and emits curve_changed so the UI can show the result live:
-## it never writes to hardware. The committed curve only changes (and
-## gets written) when the caller explicitly commits it: on start()/
-## load_curve() (switching mode, selecting a saved profile: both
-## already-known-good curves, safe to apply right away) or on
-## commit_draft() (the user clicked "Save current profile").
+## set_point() only touches the draft: updates the value, enforces
+## non-decreasing monotonicity, emits curve_changed, never writes to
+## hardware. The committed curve only changes on start()/load_curve()
+## (already-known-good curves, safe to apply right away) or
+## commit_draft() (user explicitly saves).
 ##
-## Owns one timer: a steady-state poll timer that re-applies the
-## *committed* curve on an interval, reacting to temperature changes.
-## Backends that don't need that (requires_software_polling() ==
-## false) never get it started.
+## Owns a steady-state poll timer that re-applies the committed curve
+## on an interval; only started when the backend needs it
+## (requires_software_polling() == true).
 ##
-## Only tracks one fan at a time: multi-fan support is out of scope
-## for v1 (see REQUIREMENTS.md §5).
-##
-## FanBackend/FanCurveUtils below are referenced via preload()'d consts,
-## not bare class_name lookups (see hwmon_fan_backend.gd's header
-## comment / tasks/17-fix-class-name-resolution-em-plugin-empacotado.md).
+## Referenced via preload()'d consts, not bare class_name lookups: see
+## hwmon_fan_backend.gd's header comment for why.
 const FanBackend = preload("res://plugins/fan-manager/core/backends/fan_backend.gd")
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
 
@@ -56,18 +49,11 @@ func _ready() -> void:
 	add_child(_poll_timer)
 
 
-## Attaches to `backend`/`fan_id`, sets both the draft and the
-## committed curve to `curve`, and applies it immediately: this is an
-## already-known-good curve (a saved profile, the built-in default, or
-## whatever was active before a mode switch), not a mid-edit draft, so
-## applying right away is safe and expected. `curve` may have String or
-## int temperature keys (see FanCurveUtils.normalize_keys): it's
-## normalized on entry.
-##
-## Only starts the periodic re-poll timer when
-## `backend.requires_software_polling()` is true: backends that follow
-## an uploaded curve on their own don't need the steady-state timer
-## re-applying on temperature changes.
+## Attaches to backend/fan_id, sets draft and committed curve to
+## curve, and applies it immediately (an already-known-good curve, not
+## a mid-edit draft). curve's temperature keys may be String or int;
+## normalized on entry. Starts the poll timer only if
+## backend.requires_software_polling() is true.
 func start(backend: FanBackend, fan_id: String, curve: Dictionary) -> void:
 	_backend = backend
 	_fan_id = fan_id
@@ -81,11 +67,9 @@ func start(backend: FanBackend, fan_id: String, curve: Dictionary) -> void:
 	_apply_now()
 
 
-## Same as start(), reusing whichever backend/fan_id the engine is
-## already attached to: used to load a saved profile into an
-## already-running Custom Mode session. Unlike set_point(), does not
-## emit curve_changed (callers that need to resync a UI after loading
-## should do so directly from the curve they just loaded).
+## Same as start(), reusing the currently attached backend/fan_id: used
+## to load a saved profile into an already-running session. Unlike
+## set_point(), does not emit curve_changed.
 func load_curve(curve: Dictionary) -> void:
 	if not _backend:
 		logger.warn("Cannot load curve: engine has not been started yet")
@@ -93,9 +77,8 @@ func load_curve(curve: Dictionary) -> void:
 	start(_backend, _fan_id, curve)
 
 
-## Stops polling. Does not revert the fan's current mode/pwm value on
-## the hardware: FanModeManager is responsible for switching the
-## backend to a different mode afterwards.
+## Stops polling. Does not revert the fan's mode/pwm value on hardware
+## (FanModeManager handles switching modes).
 func stop() -> void:
 	if _poll_timer:
 		_poll_timer.stop()
@@ -104,23 +87,15 @@ func stop() -> void:
 		logger.info("Stopped custom curve engine for fan '%s'" % _fan_id)
 
 
-## Returns a copy of the draft curve: i.e. what's currently displayed/
-## being edited, including any not-yet-committed changes.
+## Returns a copy of the draft curve, including uncommitted changes.
 func get_curve() -> Dictionary:
 	return _curve.duplicate(true)
 
 
-## Sets a single temperature point's fan percent on the draft curve,
-## enforcing bidirectional monotonicity (REQUIREMENTS.md §2.3): raising
-## this point above any higher-temperature point's current value raises
-## those too, and lowering it below any lower-temperature point's
-## current value lowers those too: the same rule applies symmetrically
-## in both directions, so the curve can never end up decreasing
-## regardless of which way the user drags.
-##
-## Purely an in-memory edit: never writes to hardware. Emits
-## curve_changed immediately so the UI can reflect any pushed points;
-## call commit_draft() to actually apply the draft.
+## Sets temperature's fan percent on the draft curve, pushing any
+## higher/lower points that would make the curve decrease. In-memory
+## only, never writes to hardware; emits curve_changed. Call
+## commit_draft() to actually apply.
 func set_point(temperature: int, percent: float) -> void:
 	var clamped := clampf(percent, 0.0, 100.0)
 	_curve[temperature] = clamped
@@ -145,10 +120,8 @@ func set_point(temperature: int, percent: float) -> void:
 	curve_changed.emit(get_curve())
 
 
-## Promotes the current draft to the committed curve and applies it to
-## hardware right away. This is the only thing that turns slider edits
-## into an actual hardware write: call it when the user explicitly
-## saves (see ProfileManagerPanel._commit_save()).
+## Promotes the draft to the committed curve and applies it to hardware.
+## The only thing that turns slider edits into an actual hardware write.
 func commit_draft() -> void:
 	_committed_curve = _curve.duplicate(true)
 	_apply_now()

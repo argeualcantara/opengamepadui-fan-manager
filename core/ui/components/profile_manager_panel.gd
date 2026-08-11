@@ -2,19 +2,14 @@ extends VBoxContainer
 class_name ProfileManagerPanel
 
 ## Profile picker + save button shown above the fan curve editor in
-## Custom Mode (tasks/15-picker-de-perfil-e-save-no-editor.md,
-## superseding the old always-expanded profile list from
-## tasks/08-ui-perfis-salvar-carregar.md). A single Trigger button
-## shows the active profile (or a pending "New profile" placeholder);
-## pressing it opens a dropdown to switch/delete profiles or start a
-## new one. Save always targets whichever profile is currently active
-## with no extra confirmation; a name is only asked for when there is
-## no active profile yet (the "New profile" pending state).
+## Custom Mode. A single Trigger button shows the active profile (or a
+## pending "New profile" placeholder); pressing it opens a dropdown to
+## switch/delete profiles or start a new one. Save always targets
+## whichever profile is currently active with no extra confirmation; a
+## name is only asked for when there is no active profile yet.
 ##
-## FanCurveStore/ProfileTriggerButton/ProfileRow below are referenced
-## via preload()'d consts, not bare class_name lookups (see
-## hwmon_fan_backend.gd's header comment /
-## tasks/17-fix-class-name-resolution-em-plugin-empacotado.md).
+## Referenced via preload()'d consts, not bare class_name lookups: see
+## hwmon_fan_backend.gd's header comment for why.
 const FanCurveStore = preload("res://plugins/fan-manager/core/persistence/fan_curve_store.gd")
 const ProfileTriggerButton = preload("res://plugins/fan-manager/core/ui/components/profile_trigger_button.gd")
 const ProfileRow = preload("res://plugins/fan-manager/core/ui/components/profile_row.gd")
@@ -22,12 +17,10 @@ const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_cu
 
 signal dirty_changed(is_dirty: bool)
 
-## Fires whenever the active profile marker changes for any reason:
-## selecting a profile, saving/overwriting one, deleting the active
-## one, or picking "New profile" (name == "" in the last two cases).
-## Used by GameCurveManager (tasks/12-fancurve-por-jogo.md) to know
-## when to snapshot the full per-game state; harmless to ignore
-## otherwise.
+## Fires whenever the active profile marker changes: selecting,
+## saving/overwriting, deleting the active one, or picking "New
+## profile" (profile_name == "" in the last two cases). Used by
+## GameCurveManager to know when to snapshot per-game state.
 signal active_profile_changed(profile_name: String)
 
 const ROW_SCENE := preload("res://plugins/fan-manager/core/ui/components/profile_row.tscn")
@@ -38,8 +31,7 @@ var store: FanCurveStore
 var hardware_id: String = ""
 
 ## fan_id -> CustomCurveEngine. A saved profile bundles one curve per
-## fan (tasks/14-suporte-multiplas-fans.md): save/apply/dirty-tracking
-## all iterate every engine here, never just one.
+## fan: save/apply/dirty-tracking all iterate every engine here.
 var curve_engines: Dictionary = {}
 
 @onready var trigger := $%Trigger as ProfileTriggerButton
@@ -63,6 +55,7 @@ var _pending_save_name: String = ""
 var _dirty := false
 
 
+## Wires all button/input signals and starts with dropdown/forms closed.
 func _ready() -> void:
 	trigger.pressed.connect(_toggle_dropdown)
 	save_button.pressed.connect(_on_save_pressed)
@@ -79,8 +72,8 @@ func _ready() -> void:
 
 
 ## Call whenever Custom Mode becomes active (or the hardware/engines
-## change): reloads the profile list and active-profile marker from
-## disk, and starts listening to every engine for dirty-state tracking.
+## change): reloads the profile list/active marker from disk and
+## (re)connects dirty-state tracking to p_curve_engines.
 func refresh(p_store: FanCurveStore, p_hardware_id: String, p_curve_engines: Dictionary) -> void:
 	for engine in curve_engines.values():
 		if engine.curve_changed.is_connected(_on_engine_curve_changed):
@@ -105,6 +98,8 @@ func refresh(p_store: FanCurveStore, p_hardware_id: String, p_curve_engines: Dic
 	_set_dirty(false)
 
 
+## Rebuilds the dropdown's profile rows from names, marking the one
+## matching _active_profile as active.
 func _rebuild_rows(names: Array) -> void:
 	for row in _rows:
 		row.queue_free()
@@ -123,12 +118,14 @@ func _rebuild_rows(names: Array) -> void:
 	empty_label.visible = names.is_empty()
 
 
+## Syncs the trigger button's pending/name state to _active_profile.
 func _update_trigger() -> void:
 	trigger.pending = _active_profile.is_empty()
 	if not _active_profile.is_empty():
 		trigger.profile_name = _active_profile
 
 
+## Opens the dropdown if closed, closes it if open.
 func _toggle_dropdown() -> void:
 	if dropdown.visible:
 		_close_dropdown()
@@ -142,10 +139,9 @@ func _close_dropdown() -> void:
 	trigger.open = false
 
 
-## Loads the named profile into the working curve of every fan and
-## marks it active. Public so GameCurveManager can reapply a saved
-## profile (as part of restoring a per-game snapshot) without
-## duplicating this logic.
+## Loads profile_name into the working curve of every fan and marks it
+## active. No-op (with a warning) if the profile no longer exists.
+## Public so GameCurveManager can reapply a saved profile.
 func apply_profile(profile_name: String) -> void:
 	var data: Dictionary = store.load_data(hardware_id)
 	var profiles: Dictionary = data.get("profiles", {})
@@ -170,10 +166,8 @@ func apply_profile(profile_name: String) -> void:
 	active_profile_changed.emit(profile_name)
 
 
-## Picking "New profile" doesn't ask for a name right away: it just
-## marks the picker as pending (no profile currently active) and
-## leaves the working curves alone, so the user keeps editing normally
-## and only gets asked to name it when they click Save.
+## Marks the picker pending (no active profile), leaving the working
+## curves untouched; a name is only asked for at Save time.
 func _on_new_profile_pressed() -> void:
 	_active_profile = ""
 	for row in _rows:
@@ -183,6 +177,8 @@ func _on_new_profile_pressed() -> void:
 	active_profile_changed.emit("")
 
 
+## Deletes profile_name from disk and the row list. Clears the active
+## marker (and emits active_profile_changed) if it was the active one.
 func _on_row_delete_requested(profile_name: String) -> void:
 	if not store.delete_profile(hardware_id, profile_name):
 		return
@@ -199,14 +195,13 @@ func _on_row_delete_requested(profile_name: String) -> void:
 	_rebuild_rows(profiles.keys())
 
 
+## Signal handler for CustomCurveEngine.curve_changed.
 func _on_engine_curve_changed(_curve: Dictionary) -> void:
 	_set_dirty(true)
 
 
-## Existing active profile: save straight to it, no prompt (the point
-## of moving Save into the fan region is that it always targets
-## whatever's currently picked). Pending "New profile": ask for a name
-## first, since there's nothing to overwrite yet.
+## With an active profile, saves straight to it (no prompt). With none
+## active ("New profile" pending), opens the name form instead.
 func _on_save_pressed() -> void:
 	if not _active_profile.is_empty():
 		_commit_save(_active_profile)
@@ -226,6 +221,9 @@ func _close_overwrite_box() -> void:
 	_pending_save_name = ""
 
 
+## Reads the name form's input; if it collides with an existing
+## profile, shows the overwrite confirmation instead of saving
+## directly.
 func _try_save() -> void:
 	var profile_name := name_input.text.strip_edges()
 	if profile_name.is_empty():
@@ -245,12 +243,16 @@ func _try_save() -> void:
 	_commit_save(profile_name)
 
 
+## Confirms the pending overwrite from the confirmation box and saves.
 func _confirm_overwrite() -> void:
 	var profile_name := _pending_save_name
 	_close_overwrite_box()
 	_commit_save(profile_name)
 
 
+## Saves every fan's current curve under profile_name (creating or
+## overwriting), commits the drafts to hardware, marks it active, and
+## refreshes the UI.
 func _commit_save(profile_name: String) -> void:
 	if curve_engines.is_empty():
 		logger.error("Cannot save profile '%s': no curve engines available" % profile_name)
@@ -264,10 +266,8 @@ func _commit_save(profile_name: String) -> void:
 		logger.error("Failed to save profile '%s'" % profile_name)
 		return
 
-	# Slider edits only ever touch the in-memory draft (see
-	# CustomCurveEngine.set_point()): this is the one place that
-	# actually pushes the edited curve to the hardware, for every fan
-	# at once.
+	# Slider edits only touch the in-memory draft; this pushes it to
+	# hardware for every fan.
 	for engine in curve_engines.values():
 		engine.commit_draft()
 
@@ -287,15 +287,9 @@ func _commit_save(profile_name: String) -> void:
 
 
 ## Commits every fan's draft curve to hardware and disk, straight to
-## whichever profile is currently active (defaulting to "Default" if
-## none is set, which shouldn't normally happen since FanModeManager
-## always ensures one exists/is active before Custom Mode starts).
-## Used by ModeSelectOverlay's standalone "Apply" button
-## (core/ui/mode_select_overlay.gd/.tscn), which lets the user commit
-## slider edits while this panel's own picker/save UI is hidden: same
-## underlying save as _on_save_pressed(), but skips the naming/
-## overwrite prompts entirely, since there's no "New profile" pending
-## state reachable without the picker UI visible.
+## whichever profile is active (falling back to "Default"), skipping
+## the naming/overwrite prompts. Used by ModeSelectOverlay's standalone
+## "Apply" button, when this panel's own picker/save UI is hidden.
 func apply_current() -> void:
 	var profile_name := _active_profile
 	if profile_name.is_empty():
@@ -303,12 +297,14 @@ func apply_current() -> void:
 	_commit_save(profile_name)
 
 
+## Persists profile_name as the active profile to disk.
 func _persist_active_profile(profile_name: String) -> void:
 	var data: Dictionary = store.load_data(hardware_id)
 	data["active_profile"] = profile_name
 	store.save(hardware_id, data)
 
 
+## Updates _dirty and emits dirty_changed, but only on an actual change.
 func _set_dirty(value: bool) -> void:
 	if _dirty == value:
 		return

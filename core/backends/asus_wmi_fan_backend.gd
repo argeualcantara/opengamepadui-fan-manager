@@ -1,33 +1,14 @@
 extends "res://plugins/fan-manager/core/backends/fan_backend.gd"
 class_name AsusWmiFanBackend
 
-## [FanBackend] for ASUS devices using the `asus-wmi` kernel driver's
-## native fan-curve hwmon interface (e.g. the ROG Ally handheld). See
-## tasks/11-backend-asus-wmi-rog-ally.md for the research this is
-## based on, and tasks/14-suporte-multiplas-fans.md for the multi-fan
-## support below (confirmed on real ROG Ally hardware: the hwmon
-## device named "asus_custom_fan_curve" exposes two independent
-## channels, pwm1/pwm2, each with its own 8-point curve: CPU and GPU.
-## Their human-readable labels ("cpu"/"gpu") live on a *different*
-## hwmon device, not this one: see get_fan_label()).
-##
-## Unlike [HwmonFanBackend], this hardware accepts an entire curve
-## table uploaded once via pwm<N>_auto_point<N>_temp/pwm: the EC then
-## follows it on its own, so no continuous polling is required
-## (requires_software_polling() returns false).
-##
-## fan_id format: "<hwmon device path>#<channel>", e.g.
-## "/sys/class/hwmon/hwmon8#1": PwmIo.split_channel_fan_id() reconstructs
-## the two parts to build actual sysfs paths (pwm<channel>,
-## pwm<channel>_enable, pwm<channel>_auto_point<N>_temp/pwm). fan<channel>_label is the one
-## exception: it's looked up across every hwmon device, not just this
-## fan_id's own, since the driver doesn't expose it on the same device
-## as the curve controls.
+## [FanBackend] for ASUS devices using the asus-wmi driver's native
+## fan-curve hwmon interface (e.g. ROG Ally). Uploads a full curve
+## table once (no polling needed). fan_id format: "<hwmon device
+## path>#<channel>".
 
-## Cross-file plugin types below are referenced via preload()'d consts,
-## not bare class_name lookups: OGUI loads plugins from a zip at
-## runtime, which never populates Godot's global class_name cache. See
-## tasks/17-fix-class-name-resolution-em-plugin-empacotado.md.
+## Referenced via preload()'d consts, not bare class_name lookups:
+## OGUI loads plugins from a zip, so the global class_name cache is
+## never populated.
 const HardwareId = preload("res://plugins/fan-manager/core/backends/hardware_id.gd")
 const PwmIo = preload("res://plugins/fan-manager/core/backends/pwm_io.gd")
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
@@ -36,30 +17,13 @@ const HWMON_DIR := "/sys/class/hwmon"
 const HWMON_NAME := "asus_custom_fan_curve"
 const MAX_HARDWARE_POINTS := 8
 
-## asus-wmi supports up to 3 independent channels (CPU/GPU/MID fan):
-## discovery just checks which pwm<N> files actually exist, this is
-## only an upper bound to stop scanning at.
+## Upper bound on channels to scan for (CPU/GPU/MID fan).
 const MAX_FAN_CHANNELS := 3
 
-## pwm<N>_enable values specific to asus-wmi's fan curve feature (not
-## the same semantics as generic hwmon). Per the kernel source
-## (fan_curve_enable_store in asus-wmi.c): 1 enables the custom curve;
-## 2 and 3 both disable it and hand control back to the firmware: the
-## *only* difference is that 3 also resets the driver's own cached
-## curve-point registers to the factory defaults, while 2 leaves
-## whatever was last written (by us or anyone else) in place. There is
-## no separate "OS-managed" curve exposed by this value at all (that
-## would be /sys/firmware/acpi/platform_profile, a different
-## subsystem, out of scope here: see tasks/11).
-##
-## BIOS Mode uses 2, not 3: resetting the driver's register cache has
-## no effect on the physical fan (both values hand control back to the
-## same firmware auto behavior) and RESET_DEFAULT is intentionally
-## left unused for now, so no cached curve-point data is ever
-## discarded. Consequence: get_bios_curve() reads those same
-## registers, so once a custom curve has been applied at least once,
-## it will keep reporting that curve back: not necessarily the
-## hardware's original factory curve. See its doc comment below.
+## pwm<N>_enable values for asus-wmi's fan curve feature. 1 = custom
+## curve; 2/3 both hand control back to firmware, 3 also resets the
+## driver's cached curve-point registers. We use BIOS = 2 so cached
+## curve data is never discarded.
 enum AsusPwmEnable { MANUAL = 1, BIOS = 2, RESET_DEFAULT = 3 }
 
 var _discovered_fans: Array[String] = []
@@ -84,18 +48,9 @@ func list_fans() -> Array[String]:
 	return _get_or_discover_fans()
 
 
-## Reads fan<channel>_label (e.g. "cpu"/"gpu" on the ROG Ally) when the
-## driver exposes it; falls back to a generic "Fan <channel>" name.
-##
-## Confirmed on real ROG Ally hardware: the label does NOT live next to
-## the curve-control files. hwmon8 (name "asus_custom_fan_curve") has
-## pwm1_enable/pwm2_enable and the 8 auto_point*_temp/pwm registers per
-## channel, but fan1_label/fan2_label live on a *different* device,
-## hwmon7: a separate hwmon node the same asus-wmi driver exposes for
-## sensor readouts. There's no direct link between the two devices
-## other than channel *number*, so this searches every hwmon device
-## for a fan<channel>_label file and assumes matching channel numbers
-## refer to the same physical fan (true for CPU=1/GPU=2 on the Ally).
+## Returns fan<channel>_label (e.g. "cpu"/"gpu") for fan_id, falling
+## back to "Fan <channel>". The label lives on a different hwmon
+## device than the curve controls, so it's searched for separately.
 func get_fan_label(fan_id: String) -> String:
 	var parts := PwmIo.split_channel_fan_id(fan_id)
 	var channel: int = parts["channel"]
@@ -109,8 +64,8 @@ func get_fan_label(fan_id: String) -> String:
 	return label.to_upper()
 
 
-## Scans every hwmon device (not just the one this fan's pwm control
-## lives on) for a fan<channel>_label file, returning the first match.
+## Scans every hwmon device for a fan<channel>_label file, returning
+## the first match.
 func _find_fan_label_across_hwmon(channel: int) -> String:
 	var dir := DirAccess.open(HWMON_DIR)
 	if not dir:
@@ -137,17 +92,9 @@ func requires_software_polling() -> bool:
 
 
 ## Reads back the curve currently programmed into the hardware's 8
-## points for the given fan channel. Returns {} if any point is
-## unreadable, matching HwmonFanBackend's fallback behavior.
-##
-## Despite the name (required by the FanBackend interface), this is
-## NOT guaranteed to be the hardware's original factory curve: BIOS
-## Mode uses pwm<N>_enable=2, which never resets these registers (see
-## AsusPwmEnable doc comment), so after the user has applied at least
-## one custom curve this session, that's what gets read back here
-## instead. In practice this only matters if Custom Mode is entered
-## with no saved profile after a custom curve was already applied and
-## then discarded/deleted: a rare edge case, but a real one.
+## points for fan_id. Returns {} if any point is unreadable. Not
+## guaranteed to be the original factory curve (BIOS mode doesn't
+## reset these registers), just whatever's currently cached.
 func get_bios_curve(fan_id: String) -> Dictionary:
 	var parts := PwmIo.split_channel_fan_id(fan_id)
 	var device: String = parts["device"]
@@ -176,8 +123,7 @@ func get_bios_curve(fan_id: String) -> Dictionary:
 	return curve
 
 
-## Sets the mode for every discovered fan channel at once: BIOS/Custom
-## Mode apply to the whole device, not a single fan.
+## Sets mode ("bios"/"custom") for every discovered fan channel.
 func set_mode(mode: String) -> bool:
 	var fans := _get_or_discover_fans()
 	if fans.is_empty():
@@ -208,10 +154,8 @@ func set_mode(mode: String) -> bool:
 	return true
 
 
-## Both 2 and 3 mean "bios" (see AsusPwmEnable doc comment: they're
-## physically identical, we just never write 3 ourselves). Only checks
-## the first discovered channel: set_mode() always keeps every
-## channel in sync, so any one of them is representative.
+## Returns "bios"/"custom"/"" based on the first discovered channel's
+## pwm_enable (every channel is kept in sync, so one is representative).
 func get_current_mode() -> String:
 	var fans := _get_or_discover_fans()
 	if fans.is_empty():
@@ -228,11 +172,8 @@ func get_current_mode() -> String:
 	return ""
 
 
-## Validates/clamps the curve, reduces it from the UI's 10 points down
-## to the hardware's 8-point limit, and uploads it in one shot to the
-## given fan channel: the EC takes it from there, no further calls are
-## needed until the curve changes again
-## (requires_software_polling() == false).
+## Validates, clamps, and reduces curve to 8 points, then uploads it
+## to fan_id in one shot.
 func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 	if curve.is_empty():
 		logger.warn("Cannot apply an empty custom curve to %s" % fan_id)
@@ -293,17 +234,12 @@ func read_fan_percent(fan_id: String) -> float:
 	return PwmIo.pwm_to_percent(raw.to_int())
 
 
-## Discovers hwmon devices whose "name" attribute is
-## "asus_custom_fan_curve", then enumerates every pwm<N> channel that
-## actually exists on each (1 on some ASUS laptops, 2 on the ROG Ally:
-## CPU + GPU). Cached once found, retried on every call until then
-## (same rationale as HwmonFanBackend: hwmon may not be populated yet
-## this early in boot).
+## Discovers hwmon devices named "asus_custom_fan_curve" and enumerates
+## their pwm<N> channels. Cached once found; retried until then (hwmon
+## may not be populated yet this early in boot).
 func _get_or_discover_fans() -> Array[String]:
-	logger.warning("entro get or discover")
 	if not _discovered_fans.is_empty():
 		return _discovered_fans
-	logger.warning("fans empty")
 
 	var discovered: Array[String] = []
 	var dir := DirAccess.open(HWMON_DIR)
@@ -311,11 +247,7 @@ func _get_or_discover_fans() -> Array[String]:
 		logger.warn("Unable to open %s" % HWMON_DIR)
 		return discovered
 
-	# Diagnostic: log every hwmon device considered and its "name", so
-	# a failed detection is debuggable from a log alone (e.g. sandbox
-	# restricting /sys/class/hwmon, or the driver not loaded yet at
-	# this point in boot) instead of a bare "no backend supports this
-	# hardware" with no path/name information to act on.
+	# Logs every device/name considered, for debugging failed detection.
 	var seen: Array[String] = []
 
 	dir.list_dir_begin()
@@ -325,11 +257,7 @@ func _get_or_discover_fans() -> Array[String]:
 			var device_path := HWMON_DIR + "/" + entry
 			var name := PwmIo.read_text(device_path + "/name").strip_edges()
 			seen.append("%s -> '%s'" % [entry, name])
-			logger.info(
-				"device_path: %s; read_text: %s)" % [device_path, device_path + "/name"]
-				)
 			if name == HWMON_NAME:
-				logger.info("Found desired name %s" % name)
 				for channel in range(1, MAX_FAN_CHANNELS + 1):
 					if FileAccess.file_exists("%s/pwm%d_enable" % [device_path, channel]):
 						discovered.append("%s#%d" % [device_path, channel])
@@ -350,10 +278,8 @@ func _get_or_discover_fans() -> Array[String]:
 	return _discovered_fans
 
 
-## Ensures the given fan channel is under custom-curve control
-## (pwm<N>_enable=1) before uploading curve points: mirrors
-## HwmonFanBackend's _ensure_manual_mode, same rationale (writes are
-## ignored otherwise).
+## Switches fan_id to manual curve control (pwm<N>_enable=1) if not
+## already set, since writes are otherwise ignored.
 func _ensure_manual_mode(fan_id: String) -> bool:
 	var parts := PwmIo.split_channel_fan_id(fan_id)
 	var path := "%s/pwm%d_enable" % [parts["device"], parts["channel"]]
@@ -366,15 +292,8 @@ func _ensure_manual_mode(fan_id: String) -> bool:
 	return _write_text(path, str(AsusPwmEnable.MANUAL))
 
 
-## The kernel doesn't validate uploaded curves (no safety check is
-## performed by the driver), so this backend enforces, in order:
-## clamping to 0-100%, and a left-to-right non-decreasing sweep (a
-## single forward pass with a running max is sufficient to guarantee
-## the whole curve is monotonic, unlike CustomCurveEngine.set_point()'s
-## incremental two-directional push, which only needs to correct
-## points relative to the one just edited). Second line of defense in
-## case a curve reaches this backend some other way (e.g. a saved
-## profile edited by hand).
+## Clamps curve values to 0-100% and forces a non-decreasing sweep
+## left to right, since the kernel doesn't validate uploaded curves.
 func _validate_and_clamp(curve: Dictionary) -> Dictionary:
 	var normalized := FanCurveUtils.normalize_keys(curve)
 	var points: Array = normalized.keys()
@@ -392,11 +311,8 @@ func _validate_and_clamp(curve: Dictionary) -> Dictionary:
 	return validated
 
 
-## Reduces a curve to at most MAX_HARDWARE_POINTS entries by keeping the
-## hottest ones and dropping the coldest. Rationale: the coldest points
-## of the UI's 10-point curve tend to sit at/near 0% anyway (idle fan),
-## so they carry the least shape information: the actively-managed
-## part of a curve is the hot end, which this always keeps in full.
+## Reduces curve to at most MAX_HARDWARE_POINTS entries, keeping the
+## hottest points and dropping the coldest.
 func _reduce_to_hardware_points(curve: Dictionary) -> Dictionary:
 	var points: Array = curve.keys()
 	points.sort()

@@ -3,31 +3,49 @@ class_name FanCurveStore
 
 ## Persists fan mode/curve configuration per hardware.
 ##
-## One JSON file per hardware_id under user://data/fan-manager/. See
-## REQUIREMENTS.md §3 for the document schema:
+## One JSON file per hardware_id under user://data/fan-manager/. This
+## class only knows about "hardware_id"/"active_mode"/"active_profile"/
+## "profiles"; the rest of the document is written directly by other
+## callers (FanModeManager, ProfileManagerPanel, GameCurveManager) via
+## load_data()/save(), not through dedicated methods here. Full schema:
 ## {
 ##   "hardware_id": "...",
 ##   "active_mode": "bios" | "custom",
 ##   "active_profile": "<name>" | null,
-##   "profiles": { "<name>": { "<temp>": <percent>, ... }, ... }
+##   "profiles": {
+##     "<name>": { "<fan_id>": { "<temp>": <percent>, ... }, ... }, ...
+##   },
+##   # Written by GameCurveManager. active_game_context is persisted on
+##   # every app switch regardless of the toggle below; per_game_enabled
+##   # only once it's been changed; game_curves only while the toggle is on:
+##   "per_game_enabled": <bool>,
+##   "active_game_context": "<context key>",
+##   "game_curves": {
+##     "<context key>": {
+##       "mode": "bios" | "custom",
+##       "active_profile": "<name>" | null,
+##       "curve": { "<fan_id>": { "<temp>": <percent>, ... }, ... }
+##     }, ...
+##   }
 ## }
+## <context key> is either "__steam_home__" (STEAM_HOME_KEY in
+## GameCurveManager, nothing running) or the running app's launch item
+## name, lowercased.
 
 const DATA_DIR := "user://data/fan-manager"
 
 var logger := Log.get_logger("FanCurveStore")
 
 
-## Returns true if a document has already been saved for this hardware
-##: used to distinguish "genuinely first run" (nothing chosen yet,
-## adopt whatever the hardware is already doing) from "we have a saved
-## active_mode to reapply."
+## Returns true if a document has already been saved for hardware_id
+## (vs. a genuinely first run).
 func exists(hardware_id: String) -> bool:
 	return FileAccess.file_exists(_path_for(hardware_id))
 
 
-## Loads the persisted document for the given hardware. Returns a fresh
-## default document (not yet written to disk) if none exists yet, or if
-## the file on disk is missing/corrupt.
+## Returns the persisted document for hardware_id, or a fresh default
+## document (not written to disk) if none exists yet or the file is
+## corrupt.
 func load_data(hardware_id: String) -> Dictionary:
 	var path := _path_for(hardware_id)
 
@@ -47,9 +65,8 @@ func load_data(hardware_id: String) -> Dictionary:
 	return parsed as Dictionary
 
 
-## Writes the given document for the given hardware, atomically (write
-## to a temp file, then rename over the target) so a crash mid-write
-## can't leave a corrupt/truncated JSON file behind.
+## Writes data for hardware_id atomically (temp file + rename) so a
+## crash mid-write can't leave a corrupt file. Returns true on success.
 func save(hardware_id: String, data: Dictionary) -> bool:
 	var path := _path_for(hardware_id)
 	var dir_path := path.get_base_dir()
@@ -77,21 +94,14 @@ func save(hardware_id: String, data: Dictionary) -> bool:
 	return true
 
 
-## Saves (creating or overwriting) a named custom curve profile for the
-## given hardware. Does not change active_mode/active_profile: see
-## FanModeManager (activity 04) for switching to the saved profile.
+## Saves (creating or overwriting) a named curve profile for
+## hardware_id. Does not change active_mode/active_profile. Returns
+## false if name is empty.
 func save_profile(hardware_id: String, name: String, curve: Dictionary) -> bool:
 	if name.is_empty():
 		logger.error("Cannot save a profile with an empty name")
 		return false
 
-	# load_data(), not load(): a bare call resolves to the Godot global
-	# load() (loads a Resource from a path) instead of this class's own
-	# method of the same name, since this method's name shadows the
-	# global one. That silently mistypes `data` as Resource instead of
-	# Dictionary, which then fails static type-checking on every use
-	# below it: only surfaces once the whole plugin actually compiles
-	# (see tasks/17), so it went unnoticed until now.
 	var data := load_data(hardware_id)
 	var profiles: Dictionary = data.get("profiles")
 	if profiles == null:
@@ -106,9 +116,8 @@ func save_profile(hardware_id: String, name: String, curve: Dictionary) -> bool:
 	return saved
 
 
-## Deletes a named profile. If it was the active profile, active_profile
-## is cleared (set to null) so the caller isn't left pointing at a
-## profile that no longer exists.
+## Deletes profile name for hardware_id. Clears active_profile if it
+## pointed at this profile. Returns false if the profile doesn't exist.
 func delete_profile(hardware_id: String, name: String) -> bool:
 	var data := load_data(hardware_id)
 	var profiles: Dictionary = data.get("profiles")
@@ -131,7 +140,7 @@ func delete_profile(hardware_id: String, name: String) -> bool:
 	return saved
 
 
-## Returns the names of all saved profiles for the given hardware.
+## Returns the names of all saved profiles for hardware_id.
 func list_profiles(hardware_id: String) -> Array[String]:
 	var data := load_data(hardware_id)
 	var profiles: Dictionary = data.get("profiles")
@@ -139,13 +148,14 @@ func list_profiles(hardware_id: String) -> Array[String]:
 	if profiles == null:
 		profiles = {}
 
-
 	var names: Array[String] = []
 	for profile_name in profiles.keys():
 		names.append(profile_name)
 	return names
 
 
+## Returns a fresh, empty document for hardware_id (see the schema in
+## the header comment).
 func _default_data(hardware_id: String) -> Dictionary:
 	return {
 		"hardware_id": hardware_id,
@@ -155,6 +165,7 @@ func _default_data(hardware_id: String) -> Dictionary:
 	}
 
 
+## Returns the JSON file path on disk for hardware_id.
 func _path_for(hardware_id: String) -> String:
 	return "%s/%s.json" % [DATA_DIR, _sanitize_id(hardware_id)]
 
