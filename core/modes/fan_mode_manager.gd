@@ -18,7 +18,7 @@ signal mode_changed(mode: String)
 
 const VALID_MODES := ["bios", "custom"]
 
-var logger := Log.get_logger("FanModeManager")
+var logger := Log.get_logger("FanManager FanModeManager")
 
 var registry: FanBackendRegistry
 var store: FanCurveStore
@@ -44,6 +44,7 @@ func _ready() -> void:
 		return
 
 	hardware_id = backend.get_hardware_id()
+	logger.debug("Using backend '%s' for hardware '%s'" % [backend.get_script().get_global_name(), hardware_id])
 
 	if not store.exists(hardware_id):
 		# First run for this hardware: adopt whatever mode it's already
@@ -53,6 +54,7 @@ func _ready() -> void:
 
 	var data: Dictionary = store.load_data(hardware_id)
 	var saved_mode: String = data.get("active_mode", "bios")
+	logger.debug("Reapplying saved mode '%s' on startup" % saved_mode)
 
 	if not set_mode(saved_mode):
 		logger.warn(
@@ -63,7 +65,9 @@ func _ready() -> void:
 
 func _adopt_current_hardware_mode() -> void:
 	var detected := backend.get_current_mode()
+	logger.debug("_adopt_current_hardware_mode(): backend reports current mode '%s'" % detected)
 	if detected not in VALID_MODES:
+		logger.debug("'%s' is not a valid mode, defaulting to 'bios'" % detected)
 		detected = "bios"
 
 	current_mode = detected
@@ -96,6 +100,7 @@ func set_mode(mode: String) -> bool:
 		return false
 
 	var previous_mode := current_mode if not current_mode.is_empty() else "(none)"
+	logger.debug("set_mode('%s'): stopping %d curve engine(s) from previous mode '%s'" % [mode, curve_engines.size(), previous_mode])
 
 	# Stop the previous mode's activity before touching the backend.
 	for engine in curve_engines.values():
@@ -127,6 +132,7 @@ func _ensure_curve_engine(fan_id: String) -> CustomCurveEngine:
 	if curve_engines.has(fan_id):
 		return curve_engines[fan_id]
 
+	logger.debug("Creating new CustomCurveEngine for fan '%s'" % fan_id)
 	var engine := CustomCurveEngine.new()
 	add_child(engine)
 	curve_engines[fan_id] = engine
@@ -147,6 +153,10 @@ func _start_custom_mode() -> void:
 	var profiles: Dictionary = data.get("profiles")
 	if profiles == null:
 		profiles = {}
+	logger.debug(
+		"_start_custom_mode(): fans=%s active_profile=%s known_profiles=%s"
+		% [fans, active_profile, profiles.keys()]
+	)
 
 	var profile_curves: Dictionary = {}
 	var profile_name := ""
@@ -186,6 +196,9 @@ func _start_custom_mode() -> void:
 		var curve: Dictionary = engine.get_curve()
 		if curve.is_empty():
 			curve = profile_curves.get(fan_id, FanCurveUtils.DEFAULT_BALANCED_CURVE.duplicate())
+			logger.debug("Fan '%s': no in-memory curve, seeding from profile/default" % fan_id)
+		else:
+			logger.debug("Fan '%s': reusing in-memory curve from previous session" % fan_id)
 
 		engine.start(backend, fan_id, curve)
 
@@ -200,17 +213,20 @@ func _adopt_current_custom_curve() -> void:
 
 	for fan_id in fans:
 		var curve := FanCurveUtils.resample_to_fixed_points(backend.get_bios_curve(fan_id))
+		logger.debug("_adopt_current_custom_curve(): fan '%s' -> %s" % [fan_id, curve])
 		var engine := _ensure_curve_engine(fan_id)
 		engine.start(backend, fan_id, curve)
 
 
 func _persist_active_mode(mode: String) -> void:
+	logger.debug("Persisting active_mode='%s' for hardware '%s'" % [mode, hardware_id])
 	var data: Dictionary = store.load_data(hardware_id)
 	data["active_mode"] = mode
 	store.save(hardware_id, data)
 
 
 func _persist_active_profile(profile_name: String) -> void:
+	logger.debug("Persisting active_profile='%s' for hardware '%s'" % [profile_name, hardware_id])
 	var data: Dictionary = store.load_data(hardware_id)
 	data["active_profile"] = profile_name
 	store.save(hardware_id, data)

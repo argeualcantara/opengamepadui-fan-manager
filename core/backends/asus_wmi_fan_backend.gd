@@ -30,11 +30,13 @@ var _discovered_fans: Array[String] = []
 
 
 func _init() -> void:
-	logger = Log.get_logger("AsusWmiFanBackend")
+	logger = Log.get_logger("FanManager AsusWmiFanBackend")
 
 
 func is_supported() -> bool:
-	return not _get_or_discover_fans().is_empty()
+	var supported := not _get_or_discover_fans().is_empty()
+	logger.debug("is_supported() -> %s" % supported)
+	return supported
 
 
 func get_hardware_id() -> String:
@@ -45,7 +47,9 @@ func get_hardware_id() -> String:
 
 
 func list_fans() -> Array[String]:
-	return _get_or_discover_fans()
+	var fans := _get_or_discover_fans()
+	logger.debug("list_fans() -> %s" % fans)
+	return fans
 
 
 ## Returns fan<channel>_label (e.g. "cpu"/"gpu") for fan_id, falling
@@ -60,6 +64,7 @@ func get_fan_label(fan_id: String) -> String:
 		label = _find_fan_label_across_hwmon(channel)
 
 	if label.is_empty():
+		logger.debug("get_fan_label(%s): no label found, using generic 'Fan %d'" % [fan_id, channel])
 		return "Fan %d" % channel
 	return label.to_upper()
 
@@ -120,6 +125,7 @@ func get_bios_curve(fan_id: String) -> Dictionary:
 		var temp_c := temp_raw.to_int()
 		curve[temp_c] = PwmIo.pwm_to_percent(pwm_raw.to_int())
 
+	logger.debug("get_bios_curve(%s) -> %s" % [fan_id, curve])
 	return curve
 
 
@@ -140,6 +146,8 @@ func set_mode(mode: String) -> bool:
 			logger.error("Unknown fan mode '%s'" % mode)
 			return false
 
+	logger.debug("set_mode('%s'): writing pwm_enable=%d to %s" % [mode, enable_value, fans])
+
 	var failed_fans: Array[String] = []
 	for fan_id in fans:
 		var parts := PwmIo.split_channel_fan_id(fan_id)
@@ -151,6 +159,7 @@ func set_mode(mode: String) -> bool:
 		logger.error("Failed to set mode '%s' for fan(s): %s" % [mode, ", ".join(failed_fans)])
 		return false
 
+	logger.debug("set_mode('%s') succeeded for all %d fan(s)" % [mode, fans.size()])
 	return true
 
 
@@ -165,11 +174,14 @@ func get_current_mode() -> String:
 	var raw := PwmIo.read_text(
 		"%s/pwm%d_enable" % [parts["device"], parts["channel"]]
 	).strip_edges()
+
+	var mode := ""
 	if raw == str(AsusPwmEnable.MANUAL):
-		return "custom"
-	if raw == str(AsusPwmEnable.BIOS) or raw == str(AsusPwmEnable.RESET_DEFAULT):
-		return "bios"
-	return ""
+		mode = "custom"
+	elif raw == str(AsusPwmEnable.BIOS) or raw == str(AsusPwmEnable.RESET_DEFAULT):
+		mode = "bios"
+	logger.debug("get_current_mode(): pwm_enable='%s' (from %s) -> '%s'" % [raw, fans[0], mode])
+	return mode
 
 
 ## Validates, clamps, and reduces curve to 8 points, then uploads it
@@ -193,6 +205,7 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 	var reduced := _reduce_to_hardware_points(validated)
 	var points: Array = reduced.keys()
 	points.sort()
+	logger.debug("apply_custom_curve(%s): uploading points %s" % [fan_id, reduced])
 
 	for i in points.size():
 		var temp: int = points[i]
@@ -222,7 +235,9 @@ func read_temperature(fan_id: String) -> float:
 	if raw.is_empty():
 		logger.warn("Unable to read temp%d_input for %s" % [int(parts["channel"]), fan_id])
 		return -1.0
-	return raw.to_float() / 1000.0
+	var celsius := raw.to_float() / 1000.0
+	logger.debug("read_temperature(%s) -> %.1f°C (raw='%s')" % [fan_id, celsius, raw])
+	return celsius
 
 
 func read_fan_percent(fan_id: String) -> float:
@@ -231,7 +246,9 @@ func read_fan_percent(fan_id: String) -> float:
 	if raw.is_empty():
 		logger.warn("Unable to read pwm%d for %s" % [int(parts["channel"]), fan_id])
 		return -1.0
-	return PwmIo.pwm_to_percent(raw.to_int())
+	var percent := PwmIo.pwm_to_percent(raw.to_int())
+	logger.debug("read_fan_percent(%s) -> %.1f%% (raw='%s')" % [fan_id, percent, raw])
+	return percent
 
 
 ## Discovers hwmon devices named "asus_custom_fan_curve" and enumerates
@@ -258,7 +275,10 @@ func _get_or_discover_fans() -> Array[String]:
 			var name := PwmIo.read_text(device_path + "/name").strip_edges()
 			seen.append("%s -> '%s'" % [entry, name])
 			if name == HWMON_NAME:
+				logger.debug("hwmon found %s in %s" % [HWMON_NAME, HWMON_DIR])
 				for channel in range(1, MAX_FAN_CHANNELS + 1):
+					var pwm_path_channel = "%s/pwm%d_enable" % [device_path, channel]
+					logger.debug("checking PWM_ENABLE_PATH -> %s" % pwm_path_channel)
 					if FileAccess.file_exists("%s/pwm%d_enable" % [device_path, channel]):
 						discovered.append("%s#%d" % [device_path, channel])
 		entry = dir.get_next()
@@ -286,6 +306,7 @@ func _ensure_manual_mode(fan_id: String) -> bool:
 
 	var raw := PwmIo.read_text(path).strip_edges()
 	if raw == str(AsusPwmEnable.MANUAL):
+		logger.debug("%s already in manual fan curve control" % fan_id)
 		return true
 
 	logger.info("Switching %s to manual fan curve control" % fan_id)
