@@ -2,100 +2,77 @@
 extends RefCounted
 class_name FanBackend
 
-## Base class for fan control backends.
-##
-## A FanBackend implements fan detection and control for one specific
-## family of hardware (e.g. a generic hwmon device, or a vendor-specific
-## embedded controller). New hardware support is added by implementing
-## this interface and registering the backend with [FanBackendRegistry]:
-## no changes to the UI or persistence layer should be required.
+## Base class for fan control backends: one implementation per family
+## of hardware (e.g. generic hwmon, or a vendor-specific EC). Register
+## new backends with [FanBackendRegistry].
 
 var logger := Log.get_logger("FanBackend")
 
 
-## Returns true if this backend recognizes and can control the current
-## hardware. Called by [FanBackendRegistry] during detection.
+## Returns true if this backend can control the current hardware.
 func is_supported() -> bool:
 	return false
 
 
-## Returns a stable identifier for the detected hardware, used as the
-## persistence key for saved fan curves. Must remain stable across
-## reboots (e.g. derived from DMI product/board name, not hwmon index).
+## Returns a stable id for the detected hardware, used as the
+## persistence key for saved fan curves (e.g. DMI product/board name).
 func get_hardware_id() -> String:
 	return ""
 
 
-## Returns the IDs of the controllable fans/devices found on this
-## hardware. May return more than one (REQUIREMENTS.md §5: v1 assumed
-## a single fan per device; tasks/14-suporte-multiplas-fans.md lifted
-## that for backends that genuinely have more than one, e.g. a ROG
-## Ally's separate CPU/GPU fan channels). Callers must not assume
-## `size() == 1`.
+## Returns the ids of the controllable fans on this hardware. May
+## return more than one; callers must not assume size() == 1.
 func list_fans() -> Array[String]:
 	return []
 
 
-## Human-readable label for the given fan_id (e.g. "CPU", "GPU"), used
-## by the UI's per-fan tabs when a backend reports more than one fan.
-## Falls back to a generic name when the backend has no better one.
+## Human-readable label for fan_id (e.g. "CPU", "GPU"). Falls back to
+## a generic name when the backend has no better one.
 func get_fan_label(_fan_id: String) -> String:
 	return "Fan"
 
 
-## Returns the fan curve currently configured by the BIOS/firmware for
-## the given fan, as a Dictionary mapping temperature (°C) to fan speed
-## (int, 0-100%). Used to seed the custom curve editor the first time a
-## user enters Custom Mode without a saved profile.
+## Returns the BIOS/firmware fan curve for fan_id, as {temperature °C:
+## speed % (int, 0-100)}. Used to seed the custom curve editor when no
+## saved profile exists yet.
 func get_bios_curve(_fan_id: String) -> Dictionary:
 	return {}
 
 
-## Switches the backend into the given mode ("bios" or "custom").
-## Returns false if the mode is not supported or the switch failed.
+## Switches the backend into mode ("bios" or "custom"). Returns false
+## if unsupported or the switch failed.
 func set_mode(_mode: String) -> bool:
 	return false
 
 
-## Reads which mode the hardware is *currently* configured for
-## ("bios"/"custom"), without writing anything. Returns "" if it
-## can't be determined. Used on a genuinely first run (no persisted
-## active_mode yet) to adopt whatever the hardware/BIOS already had
-## configured instead of overwriting it with an assumed default.
+## Returns the mode ("bios"/"custom") the hardware is currently
+## configured for, without writing anything. Returns "" if unknown.
 func get_current_mode() -> String:
 	return ""
 
 
-## Applies a custom fan curve to the given fan. The curve maps
-## temperature (°C) to fan speed (int, 0-100%). Temperature keys may be
-## int or numeric String: the latter is what a curve loaded straight
-## from JSON persistence (REQUIREMENTS.md §3) will contain, since JSON
-## object keys are always strings. Implementations must tolerate both.
+## Applies curve ({temperature: speed %}) to fan_id. Temperature keys
+## may be int or numeric String (JSON persistence uses string keys);
+## implementations must tolerate both.
 func apply_custom_curve(_fan_id: String, _curve: Dictionary) -> bool:
 	return false
 
 
-## Reads the current temperature (°C) for the given fan's sensor.
-## Returns a negative value on read failure.
+## Reads the current temperature (°C) for fan_id's sensor. Returns a
+## negative value on read failure.
 func read_temperature(_fan_id: String) -> float:
 	return -1.0
 
 
-## Reads the current fan speed (0-100%) for the given fan.
-## Returns a negative value on read failure.
+## Reads the current fan speed (0-100%) for fan_id. Returns a negative
+## value on read failure.
 func read_fan_percent(_fan_id: String) -> float:
 	return -1.0
 
 
-## Returns true if applying a custom curve requires CustomCurveEngine to
-## keep polling temperature and re-writing the target speed in
-## software. Most hwmon interfaces only accept one instantaneous
-## duty-cycle value, so this defaults to true. Backends that can upload
-## a whole curve table into hardware (e.g. a vendor EC that follows the
-## curve on its own once written) should override this to false: the
-## engine still attaches and applies every edit through this backend
-## (it's always the source of truth for the working curve), it just
-## skips the steady-state re-poll timer, since the hardware reacts to
-## temperature changes on its own.
+## Returns true if CustomCurveEngine must keep polling and re-writing
+## the target speed for this backend, vs. uploading a whole curve
+## table once and letting the hardware follow it on its own. Defaults
+## to true.
 func requires_software_polling() -> bool:
 	return true

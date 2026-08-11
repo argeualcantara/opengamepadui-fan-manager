@@ -1,15 +1,12 @@
 extends RefCounted
 class_name FanBackendRegistry
 
-## Selects the appropriate [FanBackend] for the current hardware.
+## Selects the [FanBackend] for the current hardware: tries backends
+## in registration order, returns the first whose is_supported() is
+## true.
 ##
-## Backends are tried in registration order (most specific hardware
-## first, generic fallbacks last). The first backend whose
-## [method FanBackend.is_supported] returns true is used.
-##
-## FanBackend/HardwareId are referenced below via preload()'d consts,
-## not bare class_name lookups: see hwmon_fan_backend.gd's header
-## comment for why.
+## Referenced via preload()'d consts, not bare class_name lookups: see
+## hwmon_fan_backend.gd's header comment for why.
 const FanBackend = preload("res://plugins/fan-manager/core/backends/fan_backend.gd")
 const HardwareId = preload("res://plugins/fan-manager/core/backends/hardware_id.gd")
 
@@ -29,13 +26,8 @@ func get_backends() -> Array[FanBackend]:
 	return _backends
 
 
-## Detects and returns the first supported backend, or null if no
-## registered backend recognizes the current hardware. Identifies the
-## hardware (DMI) once, up front, before probing any backend: purely a
-## diagnostic/ordering change (every backend already derives the same
-## id from HardwareId.from_dmi() internally for get_hardware_id()) —
-## which backend gets picked is still decided entirely by
-## is_supported(), tried in registration order.
+## Returns the first supported backend, or null if none recognize the
+## current hardware.
 func detect() -> FanBackend:
 	var hardware_id := HardwareId.from_dmi()
 	logger.info("Detected hardware '%s'; probing registered backends" % hardware_id)

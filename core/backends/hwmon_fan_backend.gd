@@ -1,37 +1,23 @@
 extends "res://plugins/fan-manager/core/backends/fan_backend.gd"
 class_name HwmonFanBackend
 
-## Generic [FanBackend] fallback based on the Linux [code]hwmon[/code]
-## sysfs interface (/sys/class/hwmon). Used when no hardware-specific
-## backend recognizes the current device.
+## Generic [FanBackend] fallback based on the Linux hwmon sysfs
+## interface (/sys/class/hwmon), used when no hardware-specific backend
+## recognizes the device. Single-fan devices use the bare hwmon device
+## path as fan_id; devices with matched pwm<N>/temp<N>_input pairs (e.g.
+## CPU+GPU handhelds) split into "<device path>#<channel>" fan_ids —
+## see _resolve_fan_channels().
 ##
-## A device exposing a single controllable fan is the common case: its
-## fan_id is just the hwmon device directory path (e.g.
-## "/sys/class/hwmon/hwmon3"), covering most desktop motherboards. When
-## a device exposes multiple pwm<N>/temp<N>_input pairs for the exact
-## same set of channel numbers (common on handhelds with independent
-## CPU/GPU fans: ROG Ally, GPD Win, Legion Go, MSI Claw, etc.), each
-## channel becomes its own fan_id, "<device path>#<channel>" (same
-## format AsusWmiFanBackend already uses) — see
-## _resolve_fan_channels() for exactly when that split happens versus
-## falling back to the single-fan case.
-##
-## Cross-file plugin types below are referenced via preload()'d consts,
-## not bare class_name lookups: OGUI loads plugins from a zip at
-## runtime (ProjectSettings.load_resource_pack()), which never
-## populates Godot's global class_name cache, so bare names like
-## `HardwareId` fail to resolve outside the file that declares them.
-## See tasks/17-fix-class-name-resolution-em-plugin-empacotado.md.
+## Referenced via preload()'d consts, not bare class_name lookups:
+## OGUI loads plugins from a zip, so the global class_name cache is
+## never populated.
 const HardwareId = preload("res://plugins/fan-manager/core/backends/hardware_id.gd")
 const PwmIo = preload("res://plugins/fan-manager/core/backends/pwm_io.gd")
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
 
 const HWMON_DIR := "/sys/class/hwmon"
 
-## Generic hwmon devices can expose more than 2 independent channels in
-## principle; this is only an upper bound to stop scanning at (same
-## role as AsusWmiFanBackend.MAX_FAN_CHANNELS), not an assumption about
-## how many any real device has.
+## Upper bound on channels to scan for.
 const MAX_FAN_CHANNELS := 4
 
 ## pwm1_enable values, per the Linux hwmon sysfs-interface documentation.
@@ -97,9 +83,8 @@ func set_mode(mode: String) -> bool:
 	return true
 
 
-## Only checks the first discovered fan: set_mode() always keeps every
-## channel in sync (same rationale as AsusWmiFanBackend), so any one of
-## them is representative.
+## Returns "bios"/"custom"/"" based on the first discovered channel's
+## pwm_enable (every channel is kept in sync, so one is representative).
 func get_current_mode() -> String:
 	var fans := _get_or_discover_fans()
 	if fans.is_empty():
@@ -135,10 +120,7 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 	var percent := _interpolate_curve(curve, temperature)
 	var pwm_value := _percent_to_pwm(percent)
 
-	# Skip the write (and the log line) if the target hasn't changed
-	# since last time: this runs every poll tick (default 2s), so
-	# without this check both the hardware write and the log would
-	# repeat forever even when nothing actually changed.
+	# Skip if the target hasn't changed since last time (runs every poll tick).
 	if _last_written_pwm.get(fan_id) == pwm_value:
 		return true
 
@@ -171,11 +153,9 @@ func read_fan_percent(fan_id: String) -> float:
 
 
 ## Discovers hwmon devices exposing at least a matched pwm1/temp1_input
-## pair, splitting a device into multiple independent fan_ids
-## ("<device path>#<channel>") when it exposes pwm<N>/temp<N>_input for
-## the exact same set of channels (see _resolve_fan_channels()).
-## Cached once a non-empty result is found; retried on every call until
-## then, since hwmon may not be fully populated yet this early in boot.
+## pair (see _resolve_fan_channels() for the multi-fan split). Cached
+## once found; retried until then (hwmon may not be populated yet this
+## early in boot).
 func _get_or_discover_fans() -> Array[String]:
 	if not _discovered_fans.is_empty():
 		return _discovered_fans
@@ -186,9 +166,7 @@ func _get_or_discover_fans() -> Array[String]:
 		logger.warn("Unable to open %s" % HWMON_DIR)
 		return discovered
 
-	# Diagnostic: log every hwmon device considered, so a failed
-	# detection is debuggable from a log alone instead of a bare "no
-	# backend supports this hardware" with nothing to act on.
+	# Logs every device considered, for debugging failed detection.
 	var seen: Array[String] = []
 
 	dir.list_dir_begin()
@@ -207,9 +185,6 @@ func _get_or_discover_fans() -> Array[String]:
 				for channel in channels:
 					discovered.append("%s#%d" % [device_path, channel])
 			elif channels.size() == 1:
-				# Backward compatible with every fan_id already saved
-				# by FanCurveStore for single-fan hardware (the common
-				# case): the bare device path, no "#channel" suffix.
 				discovered.append(device_path)
 		entry = dir.get_next()
 	dir.list_dir_end()
@@ -222,11 +197,9 @@ func _get_or_discover_fans() -> Array[String]:
 	return _discovered_fans
 
 
-## Returns the channel numbers (1..MAX_FAN_CHANNELS) for which
-## "<device_path>/<name_pattern % N>" exists, e.g.
-## _find_channels(path, "pwm%d_enable") -> [1, 2] if pwm1_enable and
-## pwm2_enable both exist but pwm3_enable doesn't. Stops at the first
-## gap, same discovery style as AsusWmiFanBackend.
+## Returns channel numbers (1..MAX_FAN_CHANNELS) for which
+## "<device_path>/<name_pattern % N>" exists, stopping at the first
+## gap. E.g. _find_channels(path, "pwm%d_enable") -> [1, 2].
 func _find_channels(device_path: String, name_pattern: String) -> Array[int]:
 	var channels: Array[int] = []
 	for channel in range(1, MAX_FAN_CHANNELS + 1):
@@ -236,16 +209,9 @@ func _find_channels(device_path: String, name_pattern: String) -> Array[int]:
 	return channels
 
 
-## Only splits a device into multiple independent fans when pwm<N> and
-## temp<N>_input exist for the exact same set of channels: there's no
-## reliable cross-vendor convention for pairing them otherwise (unlike
-## AsusWmiFanBackend, which controls one specific, well-documented
-## driver) — see REQUIREMENTS.md §5. Falls back to the single
-## historical fan (channel 1 only) in any ambiguous case, e.g. pwm2
-## exists but temp2_input doesn't: channel counts must match too, not
-## just channel 1 being present, since a bare size comparison would
-## accept a device with pwm=[1,2], temp=[1,3] (same count, different
-## channels) as if it were safely paired.
+## Splits into multiple fans only when pwm_channels and temp_channels
+## are the exact same set (no reliable way to pair them otherwise).
+## Falls back to channel 1 only in any ambiguous case.
 func _resolve_fan_channels(pwm_channels: Array[int], temp_channels: Array[int]) -> Array[int]:
 	if pwm_channels == temp_channels and pwm_channels.size() > 1:
 		return pwm_channels
@@ -254,10 +220,8 @@ func _resolve_fan_channels(pwm_channels: Array[int], temp_channels: Array[int]) 
 	return []
 
 
-## Ensures the given fan's pwm is under manual control (pwm1_enable=1)
-## before a custom value is written to it. Without this, drivers that
-## are still in automatic mode (2) silently discard direct pwm writes
-## on their next update tick, making apply_custom_curve() a no-op.
+## Switches fan_id to manual pwm control (pwm<N>_enable=1) if not
+## already set, since writes are otherwise silently discarded.
 func _ensure_manual_mode(fan_id: String) -> bool:
 	var parts := PwmIo.split_channel_fan_id(fan_id)
 	var path := "%s/pwm%d_enable" % [parts["device"], parts["channel"]]

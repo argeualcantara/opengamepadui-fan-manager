@@ -2,10 +2,10 @@ extends PanelContainer
 class_name ProfileTriggerButton
 
 ## The "current profile" button shown above the fan curve editor in
-## Custom Mode (tasks/15-picker-de-perfil-e-save-no-editor.md).
-## Pressing it just emits `pressed`; ProfileManagerPanel owns whether
-## the dropdown is open and tells this component what to display.
-## Mirrors ModeOptionCard/FanTabButton's focus-highlight tween pattern.
+## Custom Mode. Pressing it just emits `pressed`; ProfileManagerPanel
+## owns whether the dropdown is open and tells this component what to
+## display. Mirrors ModeOptionCard/FanTabButton's focus-highlight
+## tween pattern.
 
 signal pressed
 
@@ -43,6 +43,8 @@ signal pressed
 var _tween: Tween
 
 
+## Syncs label/chevron/dot to the current export values and wires
+## focus/hover/theme signals.
 func _ready() -> void:
 	_update_label()
 	chevron.text = "▴" if open else "▾"
@@ -56,21 +58,22 @@ func _ready() -> void:
 	_on_theme_changed()
 
 
-## Mirrors card_button.gd: TextureRect.texture isn't a themed property
-## Godot applies automatically, so the "highlight" icon has to be
-## fetched and assigned manually (see mode_option_card.gd).
+## Fetches the "highlight" icon manually: TextureRect.texture isn't a
+## themed property Godot applies automatically (mirrors card_button.gd).
 func _on_theme_changed() -> void:
 	var highlight_texture := get_theme_icon("highlight", "CardButton")
 	if highlight_texture:
 		highlight.texture = highlight_texture
 
 
+## Sets the label to the pending placeholder or profile_name.
 func _update_label() -> void:
 	if not name_label:
 		return
 	name_label.text = "New profile (unsaved)" if pending else profile_name
 
 
+## Signal handler for focus_entered/mouse_entered: fades the highlight in.
 func _on_focus() -> void:
 	if _tween:
 		_tween.kill()
@@ -80,6 +83,7 @@ func _on_focus() -> void:
 	_tween.tween_property(highlight, "modulate", Color(1, 1, 1, 1), highlight_speed)
 
 
+## Signal handler for focus_exited/mouse_exited: fades the highlight out.
 func _on_unfocus() -> void:
 	if _tween:
 		_tween.kill()
@@ -89,6 +93,7 @@ func _on_unfocus() -> void:
 	_tween.tween_property(highlight, "visible", false, 0)
 
 
+## Emits pressed on left-click or ui_accept.
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton

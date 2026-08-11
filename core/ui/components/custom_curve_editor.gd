@@ -1,20 +1,16 @@
 extends ScrollContainer
 class_name CustomCurveEditor
 
-## Generates the 10 fixed-temperature TemperatureSliderRow instances
-## (REQUIREMENTS.md §2.3) and keeps them in sync with a
-## CustomCurveEngine: row edits call engine.set_point(), and the
-## engine's curve_changed signal (fired on every edit, including
-## monotonicity pushes) re-syncs every row's displayed value.
+## Generates the 10 fixed-temperature TemperatureSliderRow instances and
+## keeps them in sync with a CustomCurveEngine: row edits call
+## engine.set_point(), and engine.curve_changed re-syncs every row's
+## displayed value.
 ##
-## Wrapped in a ScrollContainer since all 10 rows don't fit in the
-## overlay's fixed height at once: focusing a row auto-scrolls it
-## into view, since ScrollContainer doesn't do that on its own.
+## Wrapped in a ScrollContainer since all 10 rows don't fit the
+## overlay's fixed height; focusing a row auto-scrolls it into view.
 ##
-## CustomCurveEngine/TemperatureSliderRow/FanCurveUtils below are
-## referenced via preload()'d consts, not bare class_name lookups (see
-## hwmon_fan_backend.gd's header comment /
-## tasks/17-fix-class-name-resolution-em-plugin-empacotado.md).
+## Referenced via preload()'d consts, not bare class_name lookups: see
+## hwmon_fan_backend.gd's header comment for why.
 const CustomCurveEngine = preload("res://plugins/fan-manager/core/engine/custom_curve_engine.gd")
 const TemperatureSliderRow = preload("res://plugins/fan-manager/core/ui/components/temperature_slider_row.gd")
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
@@ -29,6 +25,7 @@ var _rows: Array[TemperatureSliderRow] = []
 var _syncing_from_engine := false
 
 
+## Builds the 10 rows and wires their focus neighbors.
 func _ready() -> void:
 	for temperature in FanCurveUtils.FIXED_TEMPERATURE_POINTS:
 		var row := ROW_SCENE.instantiate() as TemperatureSliderRow
@@ -38,23 +35,15 @@ func _ready() -> void:
 		rows_container.add_child(row)
 		_rows.append(row)
 
-	# Deferred: at this point in _ready(), this editor (instantiated via
-	# CURVE_EDITOR_SCENE.instantiate() in ModeSelectOverlay._ensure_fan_editors())
-	# hasn't been added to editors_container yet — that's the very next
-	# line back in the caller, which hasn't run. Every row here is
-	# still part of an orphan, not-yet-in-tree subtree, and
-	# get_path_to() (used below) hard-errors ("not inside tree") when
-	# called before attachment: defer past that.
 	_wire_focus_neighbors.call_deferred()
 
 	if engine:
 		_attach_to_engine()
 
 
-## Attaches to (or re-attaches to) the given engine: syncs displayed
-## values from it immediately and listens for further changes. Safe to
-## call again with a different engine instance (e.g. a fresh
-## CustomCurveEngine after the plugin reloads).
+## Attaches to (or re-attaches to) new_engine: syncs displayed values
+## immediately and listens for further changes. Safe to call again with
+## a different engine instance.
 func bind_engine(new_engine: CustomCurveEngine) -> void:
 	if engine and engine.curve_changed.is_connected(_on_curve_changed):
 		engine.curve_changed.disconnect(_on_curve_changed)
@@ -67,14 +56,13 @@ func bind_engine(new_engine: CustomCurveEngine) -> void:
 	_attach_to_engine()
 
 
-## First (coldest) temperature row, in FanCurveUtils.FIXED_TEMPERATURE_POINTS
-## order. Used by ModeSelectOverlay to bridge focus into this editor
-## from whatever's above it (e.g. ApplyButton), since _rows is private
-## and only exists once _ready() has actually built the rows.
+## Returns the first (coldest) row, or null if rows haven't been built
+## yet. Used by ModeSelectOverlay to bridge focus into this editor.
 func get_first_row() -> TemperatureSliderRow:
 	return _rows[0] if not _rows.is_empty() else null
 
 
+## Connects to engine.curve_changed and syncs all rows to its current curve.
 func _attach_to_engine() -> void:
 	if not engine:
 		return
@@ -83,20 +71,26 @@ func _attach_to_engine() -> void:
 	_sync_all_rows(engine.get_curve())
 
 
+## Signal handler for TemperatureSliderRow.value_changed: forwards the
+## edit to engine.set_point(), unless it's a programmatic sync.
 func _on_row_value_changed(temperature: int, percent: float) -> void:
 	if _syncing_from_engine or not engine:
 		return
 	engine.set_point(temperature, percent)
 
 
+## Signal handler for CustomCurveEngine.curve_changed.
 func _on_curve_changed(curve: Dictionary) -> void:
 	_sync_all_rows(curve)
 
 
+## Signal handler for a row's focus_entered: scrolls it into view.
 func _on_row_focused(row: TemperatureSliderRow) -> void:
 	ensure_control_visible(row)
 
 
+## Sets every row's displayed value from curve without re-emitting
+## value_changed back into the engine.
 func _sync_all_rows(curve: Dictionary) -> void:
 	_syncing_from_engine = true
 	for row in _rows:
@@ -105,15 +99,8 @@ func _sync_all_rows(curve: Dictionary) -> void:
 
 
 ## Chains ui_up/ui_down between the 10 rows, linearly, no wraparound:
-## the last row's "down" stays on the last row, and row 0's "up" is
-## deliberately left unset here (ModeSelectOverlay wires it to
-## whichever fan tab is currently selected once this editor is
-## attached — this component has no knowledge of that tab bar).
-## Not done via FocusGroup: FocusGroup's automatic VBoxContainer wiring
-## only considers direct children with focus_mode == FOCUS_ALL, and
-## each row here needs its own custom ui_left/ui_right handling
-## (see TemperatureSliderRow), so the neighbor links are set directly
-## instead: same underlying mechanism FocusGroup itself uses.
+## last row's "down" stays put; row 0's "up" is left unset for
+## ModeSelectOverlay to wire to the selected fan tab.
 func _wire_focus_neighbors() -> void:
 	for i in _rows.size():
 		var current := _rows[i]
