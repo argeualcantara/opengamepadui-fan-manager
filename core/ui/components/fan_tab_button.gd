@@ -2,10 +2,9 @@ extends PanelContainer
 class_name FanTabButton
 
 ## A small focusable tab used to switch between per-fan curve editors
-## when a backend reports more than one fan
-## (tasks/14-suporte-multiplas-fans.md). Mirrors ModeOptionCard's
-## focus-highlight pattern, simplified to a single label with a bottom
-## indicator bar for the selected state.
+## when a backend reports more than one fan. Mirrors ModeOptionCard's
+## focus-highlight pattern, with a bottom indicator bar for the
+## selected state.
 
 signal pressed
 
@@ -32,6 +31,8 @@ signal pressed
 var _tween: Tween
 
 
+## Syncs the label/indicator to the current export values and wires
+## focus/hover/theme signals.
 func _ready() -> void:
 	name_label.text = label_text
 	indicator.visible = selected
@@ -44,15 +45,15 @@ func _ready() -> void:
 	_on_theme_changed()
 
 
-## Mirrors card_button.gd: TextureRect.texture isn't a themed property
-## Godot applies automatically, so the "highlight" icon has to be
-## fetched and assigned manually (see mode_option_card.gd).
+## Fetches the "highlight" icon manually: TextureRect.texture isn't a
+## themed property Godot applies automatically (mirrors card_button.gd).
 func _on_theme_changed() -> void:
 	var highlight_texture := get_theme_icon("highlight", "CardButton")
 	if highlight_texture:
 		highlight.texture = highlight_texture
 
 
+## Signal handler for focus_entered/mouse_entered: fades the highlight in.
 func _on_focus() -> void:
 	if _tween:
 		_tween.kill()
@@ -62,6 +63,7 @@ func _on_focus() -> void:
 	_tween.tween_property(highlight, "modulate", Color(1, 1, 1, 1), highlight_speed)
 
 
+## Signal handler for focus_exited/mouse_exited: fades the highlight out.
 func _on_unfocus() -> void:
 	if _tween:
 		_tween.kill()
@@ -71,6 +73,7 @@ func _on_unfocus() -> void:
 	_tween.tween_property(highlight, "visible", false, 0)
 
 
+## Emits pressed on left-click or ui_accept.
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton

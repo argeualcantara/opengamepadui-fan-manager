@@ -2,35 +2,22 @@ extends RefCounted
 class_name PwmIo
 
 ## Shared low-level helpers for talking to Linux pwm-style sysfs
-## interfaces (hwmon's pwm1, asus-wmi's pwm1_auto_point*, etc). Used by
-## every FanBackend that reads/writes raw sysfs files, so the file I/O
-## and percent<->pwm conversion logic isn't duplicated (and doesn't
-## drift) across backends.
+## interfaces (hwmon's pwm1, asus-wmi's pwm1_auto_point*, etc), so file
+## I/O and percent<->pwm conversion aren't duplicated across backends.
 
-## Safety switch, ON by default: while true, write_text() never
-## touches the filesystem: every attribute write that would have
-## happened is logged instead (exact path + exact value), and the call
-## reports success so the rest of the plugin (mode switching, the
-## curve engine, profile save, per-game snapshots, ...) runs through
-## its normal logic unmodified. This is the single choke point every
-## backend's writes go through, so flipping this one flag makes the
-## whole plugin side-effect-free on real hardware for testing.
-##
-## Flip to false only once the logged writes have been reviewed and
-## look correct: there is deliberately no UI toggle for this yet, it
-## must be changed here in code.
+## Safety switch, ON by default: while true, write_text() only logs
+## what it would write instead of touching the filesystem, and reports
+## success. Single choke point for every backend's writes. No UI
+## toggle yet — flip manually here once logged writes look correct.
 static var dry_run := true
 
 static var logger := Log.get_logger("PwmIo")
 
 
-## Splits a "<device>#<channel>" fan_id (the format used by any
-## backend that controls more than one independent fan on the same
-## device: AsusWmiFanBackend always, HwmonFanBackend when it discovers
-## matched pwm<N>/temp<N>_input channels) back into its parts. Tolerates
-## a bare device path with no "#" by assuming channel 1, so single-fan
-## hardware's fan_id (just the device path, unchanged for backward
-## compatibility with already-saved profiles) still resolves correctly.
+## Splits a "<device>#<channel>" fan_id into {"device": ..., "channel":
+## ...}. A bare device path with no "#" defaults to channel 1, for
+## single-fan hardware's fan_id (backward compatible with saved
+## profiles).
 static func split_channel_fan_id(fan_id: String) -> Dictionary:
 	var parts := fan_id.split("#")
 	if parts.size() != 2:
@@ -49,10 +36,7 @@ static func pwm_to_percent(pwm_value: int) -> float:
 
 
 ## Reads a sysfs text file, returning "" on any failure (missing file,
-## permission denied, etc). Callers that need to distinguish "empty
-## file" from "read failed" should check strip_edges().is_empty()
-## themselves: in practice sysfs attributes are never legitimately
-## empty, so this collapses both cases intentionally.
+## permission denied, etc) or if the file is empty.
 static func read_text(path: String) -> String:
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
@@ -66,14 +50,8 @@ static func read_text(path: String) -> String:
 	return as_text.replace("\n", "")
 
 
-
-
-
-## Writes a sysfs text file. Returns false if the file couldn't be
-## opened for writing (permission denied, missing udev rule, device
-## gone). Beyond the dry_run log line below, does not log: callers
-## attach their own context (which attribute, which operation) to the
-## failure.
+## Writes text to a sysfs file. Returns false if it couldn't be opened
+## for writing (permission denied, missing udev rule, device gone).
 static func write_text(path: String, text: String) -> bool:
 	if dry_run:
 		logger.info("[DRY RUN] would write '%s' to %s" % [text, path])

@@ -3,11 +3,8 @@ class_name HardwareId
 
 const PwmIo = preload("res://plugins/fan-manager/core/backends/pwm_io.gd")
 
-## Shared hardware identification helper. Used by every FanBackend so
-## the same physical machine always produces the same hardware_id
-## regardless of which backend ends up controlling it (e.g. if
-## AsusWmiFanBackend isn't available and HwmonFanBackend takes over as
-## fallback, saved curve profiles must still apply).
+## Shared hardware identification helper: ensures every FanBackend
+## produces the same hardware_id for the same physical machine.
 
 const UNKNOWN := "unknown-hardware"
 

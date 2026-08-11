@@ -1,27 +1,23 @@
 extends VBoxContainer
 class_name ModeSelectOverlay
 
-## BIOS/OS/Custom Mode select card shown in OGUI's Quick Bar menu
-## (tasks/06-ui-select-modo-overlay.md, restructured for the Quick Bar
-## by tasks/16-quick-bar-em-vez-de-overlay.md). Reflects and drives
-## FanModeManager: no mode-switching logic lives here, only UI state.
+## BIOS/Custom Mode select card shown in OGUI's Quick Bar menu.
+## Reflects and drives FanModeManager: no mode-switching logic lives
+## here, only UI state.
 ##
 ## Plain VBoxContainer root (not OverlayProvider) on purpose: this is
 ## added to a QuickBarCard's ContentContainer (also a VBoxContainer)
 ## via Plugin.add_to_quick_bar(), which lays out children by their
-## reported minimum size, not by anchors. The previous OverlayProvider
-## version relied on anchor-based centering meant for a full-screen
-## OverlayContainer, which --overlay-mode's scene doesn't even have.
-## No internal ScrollContainer either (tried, reverted): every child
-## sits flat, directly under this root, one below the other. The Quick
-## Bar's own outer viewport already scrolls the whole card list.
+## reported minimum size, not by anchors. No internal ScrollContainer
+## either: every child sits flat, one below the other. The Quick Bar's
+## own outer viewport already scrolls the whole card list.
 ##
 ## FanModeManager/ProfileManagerPanel/GameCurveManager/
 ## CustomCurveEditor/FanTabButton below are referenced via preload()'d
-## consts, not bare class_name lookups (see hwmon_fan_backend.gd's
-## header comment / tasks/17-fix-class-name-resolution-em-plugin-empacotado.md).
-## Dropdown/Toggle are OGUI's own core classes (compiled into the base
-## game), so they resolve fine as bare names, same as FocusGroup/Label.
+## consts, not bare class_name lookups: see hwmon_fan_backend.gd's
+## header comment for why. Dropdown/Toggle are OGUI's own core classes
+## (compiled into the base game), so they resolve fine as bare names,
+## same as FocusGroup/Label.
 const FanModeManager = preload("res://plugins/fan-manager/core/modes/fan_mode_manager.gd")
 const ProfileManagerPanel = preload("res://plugins/fan-manager/core/ui/components/profile_manager_panel.gd")
 const GameCurveManager = preload("res://plugins/fan-manager/core/modes/game_curve_manager.gd")
@@ -69,6 +65,8 @@ var _fans_built := false
 var _mode_ids: Array[String] = []
 
 
+## Shows the empty state if no backend is available, otherwise wires
+## the mode dropdown/toggle/apply signals and selects the current mode.
 func _ready() -> void:
 	error_label.visible = false
 	profiles_panel.dirty_changed.connect(_on_dirty_changed)
@@ -92,15 +90,11 @@ func _ready() -> void:
 	_fix_dropdown_focus_neighbor()
 
 
-## Dropdown doesn't hold focus itself: it redirects to its internal
-## OptionButton (dropdown.gd: `focus_entered.connect(_grab_focus)` ->
-## `option_button.grab_focus()`). Its own _ready() copies our
-## focus_neighbor_bottom (set correctly, in the .tscn, relative to
-## ModeDropdown itself) onto option_button VERBATIM, as a raw string —
-## but option_button sits one level deeper (ModeDropdown > OptionButton),
-## so the same relative path resolves to the wrong node from there (one
-## ".." short). get_path_to() recomputes it correctly, relative to
-## option_button's real position, overwriting the broken copy.
+## Dropdown redirects focus to its internal OptionButton, whose own
+## _ready() copies our focus_neighbor_bottom onto it verbatim as a raw
+## path string — one level too shallow, since option_button sits one
+## level deeper than ModeDropdown. Recomputes it correctly via
+## get_path_to().
 func _fix_dropdown_focus_neighbor() -> void:
 	var option_button := mode_dropdown.option_button
 	option_button.focus_neighbor_bottom = option_button.get_path_to(per_game_toggle)
@@ -115,6 +109,10 @@ func _populate_mode_dropdown() -> void:
 		_mode_ids.append(mode_id)
 
 
+## Signal handler for Dropdown.item_selected. Applies the mode; on
+## failure, reverts the dropdown's visible selection (Dropdown/
+## OptionButton already moved it before this runs) back to the current
+## mode so the UI doesn't show a mode that was never actually applied.
 func _on_mode_selected(index: int) -> void:
 	if index < 0 or index >= _mode_ids.size():
 		return
@@ -126,11 +124,6 @@ func _on_mode_selected(index: int) -> void:
 	if not mode_manager.set_mode(mode_id):
 		error_label.text = "Unable to switch to %s. Please try again." % MODE_LABELS[mode_id]
 		error_label.visible = true
-		# Dropdown.select()/OptionButton already moved the visible
-		# selection to the failed item (unlike the old ModeOptionCard
-		# list, which never changed `selected` until this method called
-		# _select_card_for_mode() on success): revert it so the UI
-		# doesn't show a mode that was never actually applied.
 		_select_dropdown_for_mode(mode_manager.current_mode)
 		return
 
@@ -138,24 +131,27 @@ func _on_mode_selected(index: int) -> void:
 	_select_dropdown_for_mode(mode_id)
 
 
+## Signal handler for FanModeManager.mode_changed.
 func _on_mode_changed(mode: String) -> void:
 	error_label.visible = false
 	_select_dropdown_for_mode(mode)
 
 
+## Signal handler for ProfileManagerPanel.dirty_changed.
 func _on_dirty_changed(is_dirty: bool) -> void:
 	dirty_badge.visible = is_dirty
 
 
-## Called by plugin.gd once GameCurveManager exists (it needs
-## `profiles_panel`, which only resolves after this overlay's own
-## _ready() has run, so it can't be constructed any earlier).
+## Called by plugin.gd once GameCurveManager exists (needs
+## profiles_panel, which only resolves after this overlay's own
+## _ready()). Syncs the toggle to manager's state and wires it up.
 func bind_game_curve_manager(manager: GameCurveManager) -> void:
 	game_curve_manager = manager
 	per_game_toggle.button_pressed = manager.per_game_enabled
 	per_game_toggle.toggled.connect(_on_per_game_toggled)
 
 
+## Signal handler for the per-game Toggle.
 func _on_per_game_toggled(pressed: bool) -> void:
 	if game_curve_manager:
 		game_curve_manager.per_game_enabled = pressed
@@ -169,6 +165,9 @@ func _on_apply_pressed() -> void:
 	profiles_panel.apply_current()
 
 
+## Selects mode in the dropdown, shows/hides the custom editor UI, and
+## (when entering "custom") builds/binds the fan editors and refreshes
+## the profile picker.
 func _select_dropdown_for_mode(mode: String) -> void:
 	var idx := _mode_ids.find(mode)
 	if idx != -1:
@@ -189,18 +188,15 @@ func _select_dropdown_for_mode(mode: String) -> void:
 
 	profiles_panel.refresh(mode_manager.store, mode_manager.hardware_id, engines)
 
-	# Re-applied every time Custom Mode turns on, not just the first:
-	# harmless/idempotent (same target every time), and cheap insurance
-	# against ApplyButton's neighbor ever going stale.
+	# Re-applied every time Custom Mode turns on: idempotent, and cheap
+	# insurance against ApplyButton's neighbor going stale.
 	if not _fan_editors.is_empty():
 		_wire_focus_into_curve_editor.call_deferred(_fan_editors.keys()[0])
 
 
-## Builds one CustomCurveEditor per fan reported by the backend, and a
-## FanTabButton per fan when there's more than one (a single fan keeps
-## the tab bar hidden: identical to the pre-multi-fan layout). Runs
-## once; the fan list for a given hardware/backend never changes at
-## runtime.
+## Builds one CustomCurveEditor per fan reported by the backend, plus a
+## FanTabButton per fan when there's more than one (tab bar stays
+## hidden for a single fan). Runs once.
 func _ensure_fan_editors() -> void:
 	if _fans_built:
 		return
@@ -228,15 +224,10 @@ func _ensure_fan_editors() -> void:
 		_select_fan_tab(fans[0])
 
 
-## Bridges focus from ApplyButton down into the fixed entry point of
-## the curve editor area: the first fan tab if the backend reports more
-## than one fan, otherwise straight to the first TemperatureSliderRow
-## of the single editor. Safe to call repeatedly/deferred: ModeDropdown/
-## PerGameToggle/ApplyButton are each wrapped in their own MarginContainer
-## in the .tscn specifically so the root FocusGroup's recalculate_focus()
-## never sees them as direct children and never touches their
-## focus_neighbor_* — this method (and the static .tscn values for the
-## other two links) are the only things that ever set them.
+## Bridges focus from ApplyButton down into the curve editor area: the
+## first_fan_id's tab if the backend reports more than one fan,
+## otherwise straight to the first TemperatureSliderRow of the single
+## editor. Safe to call repeatedly/deferred.
 func _wire_focus_into_curve_editor(first_fan_id: String) -> void:
 	var entry_point: Control
 	if _fan_tab_buttons.has(first_fan_id):
@@ -255,18 +246,11 @@ func _wire_focus_into_curve_editor(first_fan_id: String) -> void:
 	)
 
 
-## Re-links every fan tab's "down" and the newly-selected editor's
-## first row's "up" to each other, whenever the selected tab changes
-## (called from _select_fan_tab(), both on initial build and on every
-## tab switch): REQUIREMENTS-driven UX spec is "down from any tab goes
-## to the selected editor's first row; up from the first row goes back
-## to whichever tab is currently selected" — deliberately not "the tab
-## that was focused before descending", since those can differ (moving
-## focus with ui_left/ui_right doesn't select a tab, only pressing
-## ui_accept on it does; see FanTabButton._gui_input()).
-## No-op for single-fan hardware: there's no tab bar to link, and
-## ApplyButton already points straight at the only row that exists
-## (wired once in _wire_focus_into_curve_editor()).
+## Re-links every fan tab's "down" and selected_fan_id's editor's first
+## row's "up" to each other, whenever the selected tab changes: down
+## from any tab always goes to the selected editor's first row, up from
+## that row goes back to whichever tab is currently selected. No-op for
+## single-fan hardware (no tab bar to link).
 func _wire_tab_to_selected_editor(selected_fan_id: String) -> void:
 	if not _fan_tab_buttons.has(selected_fan_id):
 		return
@@ -283,14 +267,14 @@ func _wire_tab_to_selected_editor(selected_fan_id: String) -> void:
 	first_row.focus_neighbor_top = first_row.get_path_to(selected_tab)
 
 
-## Switches the visible editor as soon as a tab is focused (gamepad nav
-## or mouse hover/click both trigger focus_entered): no separate
-## confirm step, since requiring one here could read as "focusing
-## previews it, confirming commits it" when it doesn't work that way.
+## Signal handler for FanTabButton.focus_entered: switches the visible
+## editor as soon as a tab is focused, no separate confirm step.
 func _on_fan_tab_focused(fan_id: String) -> void:
 	_select_fan_tab(fan_id)
 
 
+## Shows fan_id's editor and marks its tab selected, hiding the rest,
+## and re-wires tab<->editor focus neighbors to the new selection.
 func _select_fan_tab(fan_id: String) -> void:
 	for id in _fan_editors:
 		(_fan_editors[id] as CustomCurveEditor).visible = id == fan_id
