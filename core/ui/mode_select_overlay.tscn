@@ -43,7 +43,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 16
 
-[node name="NoBackendLabel" type="Label" parent="ScrollContent"]
+[node name="NoBackendLabel" type="Label" parent="ScrollArea/ScrollContent"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -51,7 +51,7 @@ text = "No fan control available on this hardware."
 label_settings = ExtResource("3")
 autowrap_mode = 3
 
-[node name="ModeList" type="VBoxContainer" parent="ScrollContent"]
+[node name="ModeList" type="VBoxContainer" parent="ScrollArea/ScrollContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 10
@@ -67,14 +67,14 @@ title = ""
 description = ""
 focus_neighbor_bottom = NodePath("../../PerGameToggle")
 
-[node name="PerGameToggle" parent="ScrollContent" instance=ExtResource("8")]
+[node name="PerGameToggle" parent="ScrollArea/ScrollContent" instance=ExtResource("8")]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Enable per game config"
 focus_neighbor_top = NodePath("../ModeList/ModeDropdown")
 focus_neighbor_bottom = NodePath("../ApplyButton")
 
-[node name="ApplyButton" parent="ScrollContent" instance=ExtResource("10")]
+[node name="ApplyButton" parent="ScrollArea/ScrollContent" instance=ExtResource("10")]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -83,7 +83,7 @@ focus_neighbor_top = NodePath("../PerGameToggle")
 focus_neighbor_bottom = NodePath("../ApplyButton")
 
 
-[node name="ErrorLabel" type="Label" parent="ScrollContent"]
+[node name="ErrorLabel" type="Label" parent="ScrollArea/ScrollContent"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -92,7 +92,7 @@ text = "Unable to switch mode."
 label_settings = ExtResource("3")
 autowrap_mode = 3
 
-[node name="CustomEditorSlot" type="PanelContainer" parent="ScrollContent"]
+[node name="CustomEditorSlot" type="PanelContainer" parent="ScrollArea/ScrollContent"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2

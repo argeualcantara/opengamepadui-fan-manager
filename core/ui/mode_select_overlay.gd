@@ -1,4 +1,4 @@
-extends ScrollContainer
+extends VBoxContainer
 class_name ModeSelectOverlay
 
 ## BIOS/OS/Custom Mode select card shown in OGUI's Quick Bar menu
@@ -6,18 +6,19 @@ class_name ModeSelectOverlay
 ## by tasks/16-quick-bar-em-vez-de-overlay.md). Reflects and drives
 ## FanModeManager: no mode-switching logic lives here, only UI state.
 ##
-## Root is a ScrollContainer (not OverlayProvider, and not a plain
-## VBoxContainer as before) on purpose: this is added to a
-## QuickBarCard's ContentContainer (also a VBoxContainer) via
-## Plugin.add_to_quick_bar(), which lays out children by their
+## Plain VBoxContainer root (not OverlayProvider) on purpose: this is
+## added to a QuickBarCard's ContentContainer (also a VBoxContainer)
+## via Plugin.add_to_quick_bar(), which lays out children by their
 ## reported minimum size, not by anchors. The previous OverlayProvider
 ## version relied on anchor-based centering meant for a full-screen
 ## OverlayContainer, which --overlay-mode's scene doesn't even have.
-## All the actual content lives in the child `ScrollContent`
-## VBoxContainer; this root just caps how tall the card is allowed to
-## grow (MAX_PANEL_HEIGHT) and scrolls internally past that, instead of
-## the whole Quick Bar ballooning to fit Custom Mode's 10 sliders. See
-## _update_scroll_cap().
+## HeaderRow (the "Fan Manager" title) sits directly under this root,
+## outside the scrollable area, so it's always visible; everything from
+## NoBackendLabel down lives inside the child `ScrollArea`
+## (ScrollContainer) > `ScrollContent` (VBoxContainer). ScrollArea caps
+## how tall the card is allowed to grow (MAX_PANEL_HEIGHT) and scrolls
+## internally past that, instead of the whole Quick Bar ballooning to
+## fit Custom Mode's 10 sliders. See _update_scroll_cap().
 ##
 ## FanModeManager/ProfileManagerPanel/GameCurveManager/
 ## CustomCurveEditor/FanTabButton below are referenced via preload()'d
@@ -53,6 +54,7 @@ var mode_manager: FanModeManager
 
 var logger := Log.get_logger("ModeSelectOverlay")
 
+@onready var scroll_area := $%ScrollArea as ScrollContainer
 @onready var scroll_content := $%ScrollContent as VBoxContainer
 @onready var focus_group := $%FocusGroup as FocusGroup
 @onready var mode_dropdown := $%ModeDropdown as Dropdown
@@ -228,14 +230,15 @@ func _select_dropdown_for_mode(mode: String) -> void:
 ## Recomputes how tall ScrollContent naturally wants to be (after
 ## whatever visibility/child changes the caller just made land in a
 ## layout pass, hence call_deferred() at every call site instead of
-## calling this directly) and caps this ScrollContainer's own minimum
-## size at MAX_PANEL_HEIGHT. Below the cap this just tracks the content
-## exactly (no dead space, no scrollbar); at/above it the container
-## stops growing and the overflow scrolls instead, e.g. Custom Mode
-## with every slider visible.
+## calling this directly) and caps ScrollArea's own minimum size at
+## MAX_PANEL_HEIGHT. Below the cap this just tracks the content exactly
+## (no dead space, no scrollbar); at/above it the container stops
+## growing and the overflow scrolls instead, e.g. Custom Mode with
+## every slider visible. HeaderRow sits outside ScrollArea entirely, so
+## it's never affected by this cap.
 func _update_scroll_cap() -> void:
 	var natural_height := scroll_content.get_combined_minimum_size().y
-	custom_minimum_size.y = minf(natural_height, MAX_PANEL_HEIGHT)
+	scroll_area.custom_minimum_size.y = minf(natural_height, MAX_PANEL_HEIGHT)
 
 
 ## Builds one CustomCurveEditor per fan reported by the backend, and a
