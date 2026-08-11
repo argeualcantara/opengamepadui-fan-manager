@@ -3,24 +3,9 @@
 An [OpenGamepadUI](https://github.com/ShadowBlip/OpenGamepadUI) plugin for
 monitoring and controlling system fan curves.
 
-## Status
+# Warning
 
-See [REQUIREMENTS.md](REQUIREMENTS.md) for the full spec and
-[tasks/](tasks/) for the implementation plan and progress.
-
-- `core/backends/`: the `FanBackend` interface, `FanBackendRegistry`
-  (hardware detection/selection), `HwmonFanBackend` (generic fallback
-  using the standard Linux hwmon sysfs interface), and
-  `AsusWmiFanBackend` (native hardware curve support on ASUS ROG Ally
-  and similar `asus-wmi` devices: no software polling needed).
-- `core/persistence/`: `FanCurveStore` (per-hardware JSON
-  persistence of modes and saved curve profiles).
-- `core/engine/`: `CustomCurveEngine` (polls temperature, applies the
-  active custom curve, enforces the no-decreasing-curve rule).
-- `core/modes/`: `FanModeManager` (orchestrates BIOS/OS/Custom mode
-  switching, wired up in `plugin.gd`).
-- `core/settings_menu.gd`: placeholder UI; the real select box/curve
-  editor (`tasks/06`-`08`) hasn't been built yet.
+This is still under development, USE AT YOUR OWN RISK!
 
 ## Development
 
