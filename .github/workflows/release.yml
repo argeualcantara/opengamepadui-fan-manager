@@ -1,0 +1,70 @@
+name: Release
+
+# Every push to main cuts a new patch release: no Conventional Commits
+# needed, the version is just "latest tag + 1 patch". Add
+# "[skip release]" to a commit message (e.g. a docs-only change) to
+# skip cutting a release for that push.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip release]')"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags: needed for the version/notes diff below
+
+      - name: Compute next version
+        id: version
+        run: |
+          git fetch --tags --force
+          latest_tag=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+
+          if [ -z "$latest_tag" ]; then
+            # No release has ever been cut: seed the very first one
+            # straight from plugin.json's declared version, no bump.
+            # Every release after this one bumps the patch of the
+            # previous git tag instead (plugin.json itself is not
+            # read again).
+            base_version=$(jq -r '.["plugin.version"]' plugin.json)
+            new_version="v${base_version}"
+            range=""
+          else
+            version="${latest_tag#v}"
+            IFS='.' read -r major minor patch <<< "$version"
+            new_version="v${major}.${minor}.$((patch + 1))"
+            range="${latest_tag}..HEAD"
+          fi
+
+          echo "new_version=$new_version" >> "$GITHUB_OUTPUT"
+          echo "range=$range" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        run: |
+          range="${{ steps.version.outputs.range }}"
+          if [ -z "$range" ]; then
+            git log --pretty=format:"- %s (%h)" > release_notes.md
+          else
+            git log "$range" --pretty=format:"- %s (%h)" > release_notes.md
+          fi
+          if [ ! -s release_notes.md ]; then
+            echo "No changes." > release_notes.md
+          fi
+
+      - name: Package plugin
+        run: make dist
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.new_version }}
+          name: ${{ steps.version.outputs.new_version }}
+          body_path: release_notes.md
+          files: fan-manager.zip
