@@ -33,7 +33,6 @@ class FakeLaunchManager extends RefCounted:
 
 class StubBackend extends FanBackend:
 	var supported := true
-	var os_supported := true
 	var hardware_id_value := "gut-gamecurve-test"
 	var bios_curve := {10: 0, 20: 0, 30: 15, 40: 25, 50: 35, 60: 45, 70: 60, 80: 75, 90: 90, 100: 100}
 
@@ -48,9 +47,6 @@ class StubBackend extends FanBackend:
 
 	func get_bios_curve(_fan_id: String) -> Dictionary:
 		return bios_curve
-
-	func supports_os_mode() -> bool:
-		return os_supported
 
 	func set_mode(_mode: String) -> bool:
 		return true
@@ -202,17 +198,16 @@ func test_applying_saved_context_selects_named_profile() -> void:
 	assert_eq(_engine().get_curve(), {10: 1.0, 20: 2.0})
 
 
-func test_applying_saved_mode_no_longer_supported_falls_back_gracefully() -> void:
-	backend.os_supported = false
+func test_applying_saved_invalid_mode_falls_back_gracefully() -> void:
 	var data := store.load(_test_hardware_id)
-	data["game_curves"] = {"hades": {"mode": "os", "active_profile": null, "curve": {}}}
+	data["game_curves"] = {"hades": {"mode": "turbo", "active_profile": null, "curve": {}}}
 	store.save(_test_hardware_id, data)
 
 	var mode_before := mode_manager.current_mode
 	manager.per_game_enabled = true
 	launch_manager.switch_to(FakeRunningApp.new("Hades"))
 
-	assert_eq(mode_manager.current_mode, mode_before, "an unsupported saved mode must not change anything")
+	assert_eq(mode_manager.current_mode, mode_before, "an invalid saved mode must not change anything")
 
 
 func test_enabling_toggle_with_game_already_running_applies_immediately() -> void:

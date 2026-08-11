@@ -17,9 +17,9 @@ class_name AsusWmiFanBackend
 ## (requires_software_polling() returns false).
 ##
 ## fan_id format: "<hwmon device path>#<channel>", e.g.
-## "/sys/class/hwmon/hwmon8#1": _split_fan_id() reconstructs the two
-## parts to build actual sysfs paths (pwm<channel>, pwm<channel>_enable,
-## pwm<channel>_auto_point<N>_temp/pwm). fan<channel>_label is the one
+## "/sys/class/hwmon/hwmon8#1": PwmIo.split_channel_fan_id() reconstructs
+## the two parts to build actual sysfs paths (pwm<channel>,
+## pwm<channel>_enable, pwm<channel>_auto_point<N>_temp/pwm). fan<channel>_label is the one
 ## exception: it's looked up across every hwmon device, not just this
 ## fan_id's own, since the driver doesn't expose it on the same device
 ## as the curve controls.
@@ -97,7 +97,7 @@ func list_fans() -> Array[String]:
 ## for a fan<channel>_label file and assumes matching channel numbers
 ## refer to the same physical fan (true for CPU=1/GPU=2 on the Ally).
 func get_fan_label(fan_id: String) -> String:
-	var parts := _split_fan_id(fan_id)
+	var parts := PwmIo.split_channel_fan_id(fan_id)
 	var channel: int = parts["channel"]
 
 	var label := PwmIo.read_text("%s/fan%d_label" % [parts["device"], channel]).strip_edges()
@@ -132,12 +132,6 @@ func _find_fan_label_across_hwmon(channel: int) -> String:
 	return label
 
 
-## pwm<N>_enable has no distinct "OS-managed" value (see AsusPwmEnable
-## doc comment): OS Mode isn't offered by this backend for now.
-func supports_os_mode() -> bool:
-	return false
-
-
 func requires_software_polling() -> bool:
 	return false
 
@@ -155,7 +149,7 @@ func requires_software_polling() -> bool:
 ## with no saved profile after a custom curve was already applied and
 ## then discarded/deleted: a rare edge case, but a real one.
 func get_bios_curve(fan_id: String) -> Dictionary:
-	var parts := _split_fan_id(fan_id)
+	var parts := PwmIo.split_channel_fan_id(fan_id)
 	var device: String = parts["device"]
 	var channel: int = parts["channel"]
 
@@ -196,16 +190,13 @@ func set_mode(mode: String) -> bool:
 			enable_value = AsusPwmEnable.BIOS
 		"custom":
 			enable_value = AsusPwmEnable.MANUAL
-		"os":
-			logger.warn("AsusWmiFanBackend does not support OS mode")
-			return false
 		_:
 			logger.error("Unknown fan mode '%s'" % mode)
 			return false
 
 	var failed_fans: Array[String] = []
 	for fan_id in fans:
-		var parts := _split_fan_id(fan_id)
+		var parts := PwmIo.split_channel_fan_id(fan_id)
 		var path := "%s/pwm%d_enable" % [parts["device"], parts["channel"]]
 		if not _write_text(path, str(enable_value)):
 			failed_fans.append(fan_id)
@@ -226,7 +217,7 @@ func get_current_mode() -> String:
 	if fans.is_empty():
 		return ""
 
-	var parts := _split_fan_id(fans[0])
+	var parts := PwmIo.split_channel_fan_id(fans[0])
 	var raw := PwmIo.read_text(
 		"%s/pwm%d_enable" % [parts["device"], parts["channel"]]
 	).strip_edges()
@@ -253,7 +244,7 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 		)
 		return false
 
-	var parts := _split_fan_id(fan_id)
+	var parts := PwmIo.split_channel_fan_id(fan_id)
 	var device: String = parts["device"]
 	var channel: int = parts["channel"]
 
@@ -283,7 +274,7 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 
 
 func read_temperature(fan_id: String) -> float:
-	var parts := _split_fan_id(fan_id)
+	var parts := PwmIo.split_channel_fan_id(fan_id)
 	var raw := PwmIo.read_text(
 		"%s/temp%d_input" % [parts["device"], parts["channel"]]
 	).strip_edges()
@@ -294,7 +285,7 @@ func read_temperature(fan_id: String) -> float:
 
 
 func read_fan_percent(fan_id: String) -> float:
-	var parts := _split_fan_id(fan_id)
+	var parts := PwmIo.split_channel_fan_id(fan_id)
 	var raw := PwmIo.read_text("%s/pwm%d" % [parts["device"], parts["channel"]]).strip_edges()
 	if raw.is_empty():
 		logger.warn("Unable to read pwm%d for %s" % [int(parts["channel"]), fan_id])
@@ -359,22 +350,12 @@ func _get_or_discover_fans() -> Array[String]:
 	return _discovered_fans
 
 
-## Splits a "<device>#<channel>" fan_id back into its parts. Tolerates
-## a bare device path (no "#") by assuming channel 1, so a caller that
-## somehow still has an old-format fan_id doesn't hard-crash.
-func _split_fan_id(fan_id: String) -> Dictionary:
-	var parts := fan_id.split("#")
-	if parts.size() != 2:
-		return {"device": fan_id, "channel": 1}
-	return {"device": parts[0], "channel": int(parts[1])}
-
-
 ## Ensures the given fan channel is under custom-curve control
 ## (pwm<N>_enable=1) before uploading curve points: mirrors
 ## HwmonFanBackend's _ensure_manual_mode, same rationale (writes are
 ## ignored otherwise).
 func _ensure_manual_mode(fan_id: String) -> bool:
-	var parts := _split_fan_id(fan_id)
+	var parts := PwmIo.split_channel_fan_id(fan_id)
 	var path := "%s/pwm%d_enable" % [parts["device"], parts["channel"]]
 
 	var raw := PwmIo.read_text(path).strip_edges()

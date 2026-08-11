@@ -19,7 +19,7 @@ const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_cu
 
 signal mode_changed(mode: String)
 
-const VALID_MODES := ["bios", "os", "custom"]
+const VALID_MODES := ["bios", "custom"]
 
 var logger := Log.get_logger("FanModeManager")
 
@@ -91,10 +91,10 @@ func _adopt_current_hardware_mode() -> void:
 	)
 
 
-## Switches to the given mode ("bios", "os", or "custom"), cleanly
-## stopping the previous mode's activity first. Persists the new mode
-## on success. Returns false (and logs) if the mode is invalid,
-## unsupported by the current hardware, or the switch fails.
+## Switches to the given mode ("bios" or "custom"), cleanly stopping
+## the previous mode's activity first. Persists the new mode on
+## success. Returns false (and logs) if the mode is invalid or the
+## switch fails.
 func set_mode(mode: String) -> bool:
 	if not backend:
 		logger.error("Cannot set mode '%s': no fan backend available" % mode)
@@ -102,10 +102,6 @@ func set_mode(mode: String) -> bool:
 
 	if mode not in VALID_MODES:
 		logger.error("Unknown fan mode '%s'" % mode)
-		return false
-
-	if mode == "os" and not backend.supports_os_mode():
-		logger.warn("Backend does not support OS mode; rejecting switch to '%s'" % mode)
 		return false
 
 	var previous_mode := current_mode if not current_mode.is_empty() else "(none)"

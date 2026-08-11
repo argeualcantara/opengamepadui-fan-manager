@@ -2,7 +2,6 @@ extends GutTest
 
 class MockBackend extends FanBackend:
 	var supported := true
-	var os_supported := false
 	var hardware_id_value := "mock-hardware"
 	# Only read by _adopt_current_custom_curve() now (the hardware was
 	# already in custom mode on a genuinely first run): the normal
@@ -28,9 +27,6 @@ class MockBackend extends FanBackend:
 
 	func get_bios_curve(_fan_id: String) -> Dictionary:
 		return bios_curve
-
-	func supports_os_mode() -> bool:
-		return os_supported
 
 	func get_current_mode() -> String:
 		return current_mode_value
@@ -132,20 +128,6 @@ func test_switching_from_custom_to_bios_stops_the_curve_engine() -> void:
 
 	manager.set_mode("bios")
 	assert_true(engine._poll_timer.is_stopped(), "engine must stop when leaving custom mode")
-
-
-func test_os_mode_rejected_when_unsupported() -> void:
-	backend.os_supported = false
-	var previous_mode := manager.current_mode
-
-	assert_false(manager.set_mode("os"))
-	assert_eq(manager.current_mode, previous_mode, "rejected switch must not change current_mode")
-
-
-func test_os_mode_accepted_when_supported() -> void:
-	backend.os_supported = true
-	assert_true(manager.set_mode("os"))
-	assert_eq(manager.current_mode, "os")
 
 
 func test_unknown_mode_is_rejected() -> void:
