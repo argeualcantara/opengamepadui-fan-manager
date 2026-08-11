@@ -1,17 +1,24 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://plugins/fan-manager/core/ui/mode_select_overlay.gd" id="1"]
 [ext_resource type="LabelSettings" path="res://assets/label/subheading_label.tres" id="3"]
 [ext_resource type="PackedScene" path="res://core/systems/input/focus_group.tscn" id="4"]
-[ext_resource type="PackedScene" path="res://plugins/fan-manager/core/ui/components/mode_option_card.tscn" id="5"]
 [ext_resource type="PackedScene" path="res://plugins/fan-manager/core/ui/components/profile_manager_panel.tscn" id="7"]
+[ext_resource type="PackedScene" path="res://core/ui/components/toggle.tscn" id="8"]
+[ext_resource type="PackedScene" path="res://core/ui/components/dropdown.tscn" id="9"]
 
-[node name="ModeSelectOverlay" type="VBoxContainer"]
+[node name="ModeSelectOverlay" type="ScrollContainer"]
 layout_mode = 2
-theme_override_constants/separation = 16
+follow_focus = true
 script = ExtResource("1")
 
-[node name="HeaderRow" type="HBoxContainer" parent="."]
+[node name="ScrollContent" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+
+[node name="HeaderRow" type="HBoxContainer" parent="ScrollContent"]
 layout_mode = 2
 theme_override_constants/separation = 10
 
@@ -29,7 +36,7 @@ theme_override_colors/font_color = Color(1, 0.721569, 0.423529, 1)
 text = "Unsaved"
 label_settings = ExtResource("3")
 
-[node name="NoBackendLabel" type="Label" parent="."]
+[node name="NoBackendLabel" type="Label" parent="ScrollContent"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -37,33 +44,33 @@ text = "No fan control available on this hardware."
 label_settings = ExtResource("3")
 autowrap_mode = 3
 
-[node name="ModeList" type="VBoxContainer" parent="."]
+[node name="ModeList" type="VBoxContainer" parent="ScrollContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 10
 
 [node name="FocusGroup" parent="ModeList" node_paths=PackedStringArray("current_focus") instance=ExtResource("4")]
 unique_name_in_owner = true
-current_focus = NodePath("../BiosCard")
+current_focus = NodePath("../ModeDropdown")
 
-[node name="BiosCard" parent="ModeList" instance=ExtResource("5")]
+[node name="ModeDropdown" parent="ModeList" instance=ExtResource("9")]
 unique_name_in_owner = true
 layout_mode = 2
+title = ""
+description = ""
 
-[node name="OsCard" parent="ModeList" instance=ExtResource("5")]
-unique_name_in_owner = true
-layout_mode = 2
-
-[node name="CustomCard" parent="ModeList" instance=ExtResource("5")]
-unique_name_in_owner = true
-layout_mode = 2
-
-[node name="PerGameToggle" type="CheckBox" parent="."]
+[node name="PerGameToggle" parent="ScrollContent" instance=ExtResource("8")]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Enable per game config"
 
-[node name="ErrorLabel" type="Label" parent="."]
+[node name="ApplyButton" type="Button" parent="ScrollContent"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+text = "Apply"
+
+[node name="ErrorLabel" type="Label" parent="ScrollContent"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -72,7 +79,7 @@ text = "Unable to switch mode."
 label_settings = ExtResource("3")
 autowrap_mode = 3
 
-[node name="CustomEditorSlot" type="PanelContainer" parent="."]
+[node name="CustomEditorSlot" type="PanelContainer" parent="ScrollContent"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -91,6 +98,7 @@ theme_override_constants/separation = 10
 
 [node name="ProfilesPanel" parent="CustomEditorSlot/CustomEditorMargin/CustomEditorRoot" instance=ExtResource("7")]
 unique_name_in_owner = true
+visible = false
 layout_mode = 2
 
 [node name="FanTabsBar" type="HBoxContainer" parent="CustomEditorSlot/CustomEditorMargin/CustomEditorRoot"]

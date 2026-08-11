@@ -18,6 +18,7 @@ class_name ProfileManagerPanel
 const FanCurveStore = preload("res://plugins/fan-manager/core/persistence/fan_curve_store.gd")
 const ProfileTriggerButton = preload("res://plugins/fan-manager/core/ui/components/profile_trigger_button.gd")
 const ProfileRow = preload("res://plugins/fan-manager/core/ui/components/profile_row.gd")
+const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
 
 signal dirty_changed(is_dirty: bool)
 
@@ -283,6 +284,23 @@ func _commit_save(profile_name: String) -> void:
 	_close_new_name_form()
 	_set_dirty(false)
 	active_profile_changed.emit(profile_name)
+
+
+## Commits every fan's draft curve to hardware and disk, straight to
+## whichever profile is currently active (defaulting to "Default" if
+## none is set, which shouldn't normally happen since FanModeManager
+## always ensures one exists/is active before Custom Mode starts).
+## Used by ModeSelectOverlay's standalone "Apply" button
+## (core/ui/mode_select_overlay.gd/.tscn), which lets the user commit
+## slider edits while this panel's own picker/save UI is hidden: same
+## underlying save as _on_save_pressed(), but skips the naming/
+## overwrite prompts entirely, since there's no "New profile" pending
+## state reachable without the picker UI visible.
+func apply_current() -> void:
+	var profile_name := _active_profile
+	if profile_name.is_empty():
+		profile_name = FanCurveUtils.DEFAULT_PROFILE_NAME
+	_commit_save(profile_name)
 
 
 func _persist_active_profile(profile_name: String) -> void:
