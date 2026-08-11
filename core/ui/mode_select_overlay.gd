@@ -44,7 +44,6 @@ var mode_manager: FanModeManager
 
 var logger := Log.get_logger("ModeSelectOverlay")
 
-@onready var focus_group := $%FocusGroup as FocusGroup
 @onready var mode_dropdown := $%ModeDropdown as Dropdown
 @onready var error_label := $%ErrorLabel as Label
 @onready var no_backend_label := $%NoBackendLabel as Label
@@ -92,8 +91,6 @@ func _ready() -> void:
 	apply_button.pressed.connect(_on_apply_pressed)
 
 	_select_dropdown_for_mode(mode_manager.current_mode)
-
-	focus_group.grab_focus.call_deferred()
 
 
 ## Builds the dropdown items in MODE_LABELS order, skipping "OS Mode"
@@ -185,6 +182,16 @@ func _select_dropdown_for_mode(mode: String) -> void:
 
 	profiles_panel.refresh(mode_manager.store, mode_manager.hardware_id, engines)
 
+	# Re-applied every time Custom Mode turns on (not just the first),
+	# deferred: toggling apply_button.visible/custom_editor_slot.visible
+	# just above fires the root VBoxContainer's `sort_children` signal,
+	# which FocusGroup also listens to in order to recalculate focus —
+	# and since ApplyButton is still the last node it directly manages,
+	# that recalculation re-clobbers focus_neighbor_bottom back to
+	# self-locked. Deferring puts this after that recalculation lands.
+	if not _fan_editors.is_empty():
+		_wire_focus_into_curve_editor.call_deferred(_fan_editors.keys()[0])
+
 
 ## Builds one CustomCurveEditor per fan reported by the backend, and a
 ## FanTabButton per fan when there's more than one (a single fan keeps
@@ -216,18 +223,17 @@ func _ensure_fan_editors() -> void:
 
 	if not fans.is_empty():
 		_select_fan_tab(fans[0])
-		_wire_focus_into_curve_editor(fans[0])
 
 
 ## Bridges focus from ApplyButton down into the fixed entry point of
 ## the curve editor area: the first fan tab if the backend reports more
-## than one fan (tab order never changes, so this is wired once here,
-## unlike _wire_tab_to_selected_editor()'s row0<->tab link, which
-## tracks whichever tab is currently selected), otherwise straight to
-## the first TemperatureSliderRow of the single editor. Wires both
-## directions: CustomCurveEditor no longer wraps row 0 back to row 9
-## (see _wire_focus_neighbors()), so there's no existing loop here to
-## clobber.
+## than one fan, otherwise straight to the first TemperatureSliderRow
+## of the single editor. That entry point itself never changes, but
+## this still has to be called deferred every time Custom Mode turns on
+## (see the call site in _select_dropdown_for_mode()), not just once:
+## FocusGroup re-clobbers ApplyButton's neighbor whenever the root
+## container's `sort_children` fires, which visibility toggles like
+## apply_button.visible trigger constantly.
 func _wire_focus_into_curve_editor(first_fan_id: String) -> void:
 	var entry_point: Control
 	if _fan_tab_buttons.has(first_fan_id):
