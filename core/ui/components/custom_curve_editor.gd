@@ -60,6 +60,14 @@ func bind_engine(new_engine: CustomCurveEngine) -> void:
 	_attach_to_engine()
 
 
+## First (coldest) temperature row, in FanCurveUtils.FIXED_TEMPERATURE_POINTS
+## order. Used by ModeSelectOverlay to bridge focus into this editor
+## from whatever's above it (e.g. ApplyButton), since _rows is private
+## and only exists once _ready() has actually built the rows.
+func get_first_row() -> TemperatureSliderRow:
+	return _rows[0] if not _rows.is_empty() else null
+
+
 func _attach_to_engine() -> void:
 	if not engine:
 		return
@@ -89,7 +97,11 @@ func _sync_all_rows(curve: Dictionary) -> void:
 	_syncing_from_engine = false
 
 
-## Chains ui_up/ui_down between the 10 rows (wrapping top<->bottom).
+## Chains ui_up/ui_down between the 10 rows, linearly, no wraparound:
+## the last row's "down" stays on the last row, and row 0's "up" is
+## deliberately left unset here (ModeSelectOverlay wires it to
+## whichever fan tab is currently selected once this editor is
+## attached — this component has no knowledge of that tab bar).
 ## Not done via FocusGroup: FocusGroup's automatic VBoxContainer wiring
 ## only considers direct children with focus_mode == FOCUS_ALL, and
 ## each row here needs its own custom ui_left/ui_right handling
@@ -98,10 +110,16 @@ func _sync_all_rows(curve: Dictionary) -> void:
 func _wire_focus_neighbors() -> void:
 	for i in _rows.size():
 		var current := _rows[i]
-		var next := _rows[(i + 1) % _rows.size()]
-		var previous := _rows[(i - 1 + _rows.size()) % _rows.size()]
 
-		current.focus_neighbor_bottom = current.get_path_to(next)
-		current.focus_next = current.get_path_to(next)
-		current.focus_neighbor_top = current.get_path_to(previous)
-		current.focus_previous = current.get_path_to(previous)
+		if i < _rows.size() - 1:
+			var next := _rows[i + 1]
+			current.focus_neighbor_bottom = current.get_path_to(next)
+			current.focus_next = current.get_path_to(next)
+		else:
+			current.focus_neighbor_bottom = current.get_path()
+			current.focus_next = current.get_path()
+
+		if i > 0:
+			var previous := _rows[i - 1]
+			current.focus_neighbor_top = current.get_path_to(previous)
+			current.focus_previous = current.get_path_to(previous)

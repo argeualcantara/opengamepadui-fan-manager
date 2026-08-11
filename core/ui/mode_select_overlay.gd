@@ -65,7 +65,7 @@ var logger := Log.get_logger("ModeSelectOverlay")
 @onready var profiles_panel := $%ProfilesPanel as ProfileManagerPanel
 @onready var dirty_badge := $%DirtyBadge as Label
 @onready var per_game_toggle := $%PerGameToggle as Toggle
-@onready var apply_button := $%ApplyButton as Button
+@onready var apply_button := $%ApplyButton as CardButton
 
 var game_curve_manager: GameCurveManager
 
@@ -104,9 +104,26 @@ func _ready() -> void:
 	apply_button.pressed.connect(_on_apply_pressed)
 
 	_select_dropdown_for_mode(mode_manager.current_mode)
+	_wire_dropdown_exit_focus()
 
 	focus_group.grab_focus.call_deferred()
 	_update_scroll_cap.call_deferred()
+
+
+## The only cross-boundary focus link that can't be set declaratively
+## in the .tscn: ModeList's FocusGroup treats ModeDropdown as its sole
+## child, so its own _ready() (already run by the time ours runs)
+## unconditionally overwrites ModeDropdown's focus_neighbor_* to point
+## to itself on all 4 sides (FocusGroup._single_set_focus_tree()) —
+## any NodePath set on it in the .tscn is clobbered the same way.
+## Dropdown then proxies focus_neighbor_bottom to its internal
+## OptionButton once, in Dropdown._ready() (also already run): setting
+## mode_dropdown.focus_neighbor_bottom here would land on the outer
+## wrapper, too late to matter, so this goes through
+## mode_dropdown.option_button directly instead.
+func _wire_dropdown_exit_focus() -> void:
+	var dropdown_option := mode_dropdown.option_button
+	dropdown_option.focus_neighbor_bottom = dropdown_option.get_path_to(per_game_toggle)
 
 
 ## Builds the dropdown items in MODE_LABELS order, skipping "OS Mode"
@@ -244,6 +261,58 @@ func _ensure_fan_editors() -> void:
 
 	if not fans.is_empty():
 		_select_fan_tab(fans[0])
+		_wire_focus_into_curve_editor(fans[0])
+
+
+## Bridges focus from ApplyButton down into the fixed entry point of
+## the curve editor area: the first fan tab if the backend reports more
+## than one fan (tab order never changes, so this is wired once here,
+## unlike _wire_tab_to_selected_editor()'s row0<->tab link, which
+## tracks whichever tab is currently selected), otherwise straight to
+## the first TemperatureSliderRow of the single editor. Wires both
+## directions: CustomCurveEditor no longer wraps row 0 back to row 9
+## (see _wire_focus_neighbors()), so there's no existing loop here to
+## clobber.
+func _wire_focus_into_curve_editor(first_fan_id: String) -> void:
+	var entry_point: Control
+	if _fan_tab_buttons.has(first_fan_id):
+		entry_point = _fan_tab_buttons[first_fan_id]
+	else:
+		entry_point = (_fan_editors[first_fan_id] as CustomCurveEditor).get_first_row()
+
+	if not entry_point:
+		return
+
+	apply_button.focus_neighbor_bottom = apply_button.get_path_to(entry_point)
+	entry_point.focus_neighbor_top = entry_point.get_path_to(apply_button)
+
+
+## Re-links every fan tab's "down" and the newly-selected editor's
+## first row's "up" to each other, whenever the selected tab changes
+## (called from _select_fan_tab(), both on initial build and on every
+## tab switch): REQUIREMENTS-driven UX spec is "down from any tab goes
+## to the selected editor's first row; up from the first row goes back
+## to whichever tab is currently selected" — deliberately not "the tab
+## that was focused before descending", since those can differ (moving
+## focus with ui_left/ui_right doesn't select a tab, only pressing
+## ui_accept on it does; see FanTabButton._gui_input()).
+## No-op for single-fan hardware: there's no tab bar to link, and
+## ApplyButton already points straight at the only row that exists
+## (wired once in _wire_focus_into_curve_editor()).
+func _wire_tab_to_selected_editor(selected_fan_id: String) -> void:
+	if not _fan_tab_buttons.has(selected_fan_id):
+		return
+
+	var first_row := (_fan_editors[selected_fan_id] as CustomCurveEditor).get_first_row()
+	if not first_row:
+		return
+
+	for id in _fan_tab_buttons:
+		var tab := _fan_tab_buttons[id] as FanTabButton
+		tab.focus_neighbor_bottom = tab.get_path_to(first_row)
+
+	var selected_tab := _fan_tab_buttons[selected_fan_id] as FanTabButton
+	first_row.focus_neighbor_top = first_row.get_path_to(selected_tab)
 
 
 func _on_fan_tab_pressed(fan_id: String) -> void:
@@ -255,3 +324,5 @@ func _select_fan_tab(fan_id: String) -> void:
 		(_fan_editors[id] as CustomCurveEditor).visible = id == fan_id
 	for id in _fan_tab_buttons:
 		(_fan_tab_buttons[id] as FanTabButton).selected = id == fan_id
+
+	_wire_tab_to_selected_editor(fan_id)
