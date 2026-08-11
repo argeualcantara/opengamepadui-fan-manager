@@ -51,7 +51,7 @@ var logger := Log.get_logger("ModeSelectOverlay")
 @onready var fan_tabs_bar := $%FanTabsBar as HBoxContainer
 @onready var editors_container := $%EditorsContainer as Control
 @onready var profiles_panel := $%ProfilesPanel as ProfileManagerPanel
-@onready var dirty_badge := $%DirtyBadge as Label
+@onready var dirty_badge := $%DirtyBadge as PanelContainer
 @onready var per_game_toggle := $%PerGameToggle as Toggle
 @onready var apply_button := $%ApplyButton as CardButton
 
@@ -228,7 +228,7 @@ func _ensure_fan_editors() -> void:
 			var tab := FAN_TAB_SCENE.instantiate() as FanTabButton
 			tab.fan_id = fan_id
 			tab.label_text = mode_manager.backend.get_fan_label(fan_id)
-			tab.pressed.connect(_on_fan_tab_pressed.bind(fan_id))
+			tab.focus_entered.connect(_on_fan_tab_focused.bind(fan_id))
 			fan_tabs_bar.add_child(tab)
 			_fan_tab_buttons[fan_id] = tab
 
@@ -291,7 +291,11 @@ func _wire_tab_to_selected_editor(selected_fan_id: String) -> void:
 	first_row.focus_neighbor_top = first_row.get_path_to(selected_tab)
 
 
-func _on_fan_tab_pressed(fan_id: String) -> void:
+## Switches the visible editor as soon as a tab is focused (gamepad nav
+## or mouse hover/click both trigger focus_entered): no separate
+## confirm step, since requiring one here could read as "focusing
+## previews it, confirming commits it" when it doesn't work that way.
+func _on_fan_tab_focused(fan_id: String) -> void:
 	_select_fan_tab(fan_id)
 
 

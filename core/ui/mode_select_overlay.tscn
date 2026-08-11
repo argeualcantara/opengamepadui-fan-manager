@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://plugins/fan-manager/core/ui/mode_select_overlay.gd" id="1"]
 [ext_resource type="LabelSettings" path="res://assets/label/subheading_label.tres" id="3"]
@@ -7,6 +7,13 @@
 [ext_resource type="PackedScene" path="res://core/ui/components/toggle.tscn" id="8"]
 [ext_resource type="PackedScene" path="res://core/ui/components/dropdown.tscn" id="9"]
 [ext_resource type="PackedScene" path="res://core/ui/components/card_button.tscn" id="10"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_dirty_badge"]
+bg_color = Color(1, 0.721569, 0.423529, 0.2)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
 
 [node name="ModeSelectOverlay" type="VBoxContainer"]
 layout_mode = 2
@@ -22,11 +29,22 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "Fan Manager"
 
-[node name="DirtyBadge" type="Label" parent="HeaderRow"]
+[node name="DirtyBadge" type="PanelContainer" parent="HeaderRow"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 size_flags_vertical = 4
+theme_override_styles/panel = SubResource("StyleBoxFlat_dirty_badge")
+
+[node name="DirtyBadgeMargin" type="MarginContainer" parent="HeaderRow/DirtyBadge"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 2
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 2
+
+[node name="DirtyBadgeLabel" type="Label" parent="HeaderRow/DirtyBadge/DirtyBadgeMargin"]
+layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.721569, 0.423529, 1)
 text = "Unsaved"
 label_settings = ExtResource("3")
