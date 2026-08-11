@@ -41,29 +41,37 @@ autowrap_mode = 3
 
 [node name="FocusGroup" parent="." node_paths=PackedStringArray("current_focus") instance=ExtResource("4")]
 unique_name_in_owner = true
-current_focus = NodePath("../ModeDropdown")
-wrap_focus = false
+current_focus = NodePath("../ModeDropdownSlot/ModeDropdown")
 
-[node name="ModeDropdown" parent="." instance=ExtResource("9")]
+[node name="ModeDropdownSlot" type="MarginContainer" parent="."]
+layout_mode = 2
+
+[node name="ModeDropdown" parent="ModeDropdownSlot" instance=ExtResource("9")]
 unique_name_in_owner = true
 layout_mode = 2
 title = ""
 description = ""
-focus_neighbor_bottom = NodePath("../PerGameToggle")
+focus_neighbor_bottom = NodePath("../../PerGameToggleSlot/PerGameToggle")
 
-[node name="PerGameToggle" parent="." instance=ExtResource("8")]
+[node name="PerGameToggleSlot" type="MarginContainer" parent="."]
+layout_mode = 2
+
+[node name="PerGameToggle" parent="PerGameToggleSlot" instance=ExtResource("8")]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Enable per game config"
-focus_neighbor_top = NodePath("../ModeDropdown")
-focus_neighbor_bottom = NodePath("../ApplyButton")
+focus_neighbor_top = NodePath("../../ModeDropdownSlot/ModeDropdown")
+focus_neighbor_bottom = NodePath("../../ApplyButtonSlot/ApplyButton")
 
-[node name="ApplyButton" parent="." instance=ExtResource("10")]
+[node name="ApplyButtonSlot" type="MarginContainer" parent="."]
+layout_mode = 2
+
+[node name="ApplyButton" parent="ApplyButtonSlot" instance=ExtResource("10")]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 text = "Apply"
-focus_neighbor_top = NodePath("../PerGameToggle")
+focus_neighbor_top = NodePath("../../PerGameToggleSlot/PerGameToggle")
 
 [node name="ErrorLabel" type="Label" parent="."]
 unique_name_in_owner = true

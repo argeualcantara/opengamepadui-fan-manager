@@ -182,13 +182,9 @@ func _select_dropdown_for_mode(mode: String) -> void:
 
 	profiles_panel.refresh(mode_manager.store, mode_manager.hardware_id, engines)
 
-	# Re-applied every time Custom Mode turns on (not just the first),
-	# deferred: toggling apply_button.visible/custom_editor_slot.visible
-	# just above fires the root VBoxContainer's `sort_children` signal,
-	# which FocusGroup also listens to in order to recalculate focus —
-	# and since ApplyButton is still the last node it directly manages,
-	# that recalculation re-clobbers focus_neighbor_bottom back to
-	# self-locked. Deferring puts this after that recalculation lands.
+	# Re-applied every time Custom Mode turns on, not just the first:
+	# harmless/idempotent (same target every time), and cheap insurance
+	# against ApplyButton's neighbor ever going stale.
 	if not _fan_editors.is_empty():
 		_wire_focus_into_curve_editor.call_deferred(_fan_editors.keys()[0])
 
@@ -228,12 +224,12 @@ func _ensure_fan_editors() -> void:
 ## Bridges focus from ApplyButton down into the fixed entry point of
 ## the curve editor area: the first fan tab if the backend reports more
 ## than one fan, otherwise straight to the first TemperatureSliderRow
-## of the single editor. That entry point itself never changes, but
-## this still has to be called deferred every time Custom Mode turns on
-## (see the call site in _select_dropdown_for_mode()), not just once:
-## FocusGroup re-clobbers ApplyButton's neighbor whenever the root
-## container's `sort_children` fires, which visibility toggles like
-## apply_button.visible trigger constantly.
+## of the single editor. Safe to call repeatedly/deferred: ModeDropdown/
+## PerGameToggle/ApplyButton are each wrapped in their own MarginContainer
+## in the .tscn specifically so the root FocusGroup's recalculate_focus()
+## never sees them as direct children and never touches their
+## focus_neighbor_* — this method (and the static .tscn values for the
+## other two links) are the only things that ever set them.
 func _wire_focus_into_curve_editor(first_fan_id: String) -> void:
 	var entry_point: Control
 	if _fan_tab_buttons.has(first_fan_id):
