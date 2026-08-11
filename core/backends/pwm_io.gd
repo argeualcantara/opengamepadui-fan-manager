@@ -11,7 +11,7 @@ class_name PwmIo
 ## toggle yet — flip manually here once logged writes look correct.
 static var dry_run := true
 
-static var logger := Log.get_logger("PwmIo")
+static var logger := Log.get_logger("FanManager PwmIo")
 
 
 ## Splits a "<device>#<channel>" fan_id into {"device": ..., "channel":
@@ -40,14 +40,16 @@ static func pwm_to_percent(pwm_value: int) -> float:
 static func read_text(path: String) -> String:
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
+		logger.debug("read_text('%s') failed: %s" % [path, error_string(FileAccess.get_open_error())])
 		return ""
 	var bytes := PackedByteArray()
 
 	while not f.eof_reached():
 		bytes.append_array(f.get_buffer(256))
 	f.close()
-	var as_text := bytes.get_string_from_utf8()
-	return as_text.replace("\n", "")
+	var as_text := bytes.get_string_from_utf8().replace("\n", "")
+	logger.debug("read_text('%s') -> '%s'" % [path, as_text])
+	return as_text
 
 
 ## Writes text to a sysfs file. Returns false if it couldn't be opened
@@ -59,6 +61,8 @@ static func write_text(path: String, text: String) -> bool:
 
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if not file:
+		logger.debug("write_text('%s') failed to open: %s" % [path, error_string(FileAccess.get_open_error())])
 		return false
 	file.store_string(text)
+	logger.debug("write_text('%s', '%s') succeeded" % [path, text])
 	return true

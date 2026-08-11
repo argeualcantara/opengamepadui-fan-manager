@@ -37,7 +37,7 @@ const MODE_LABELS := {
 
 var mode_manager: FanModeManager
 
-var logger := Log.get_logger("ModeSelectOverlay")
+var logger := Log.get_logger("FanManager ModeSelectOverlay")
 
 @onready var mode_dropdown := $%ModeDropdown as Dropdown
 @onready var error_label := $%ErrorLabel as Label
@@ -115,13 +115,17 @@ func _populate_mode_dropdown() -> void:
 ## mode so the UI doesn't show a mode that was never actually applied.
 func _on_mode_selected(index: int) -> void:
 	if index < 0 or index >= _mode_ids.size():
+		logger.debug("_on_mode_selected(%d): index out of range (%d ids)" % [index, _mode_ids.size()])
 		return
 
 	var mode_id := _mode_ids[index]
 	if mode_id == mode_manager.current_mode:
+		logger.debug("_on_mode_selected(%d): '%s' already active, ignoring" % [index, mode_id])
 		return
 
+	logger.debug("_on_mode_selected(%d): switching to '%s'" % [index, mode_id])
 	if not mode_manager.set_mode(mode_id):
+		logger.debug("_on_mode_selected(%d): switch to '%s' failed, reverting dropdown" % [index, mode_id])
 		error_label.text = "Unable to switch to %s. Please try again." % MODE_LABELS[mode_id]
 		error_label.visible = true
 		_select_dropdown_for_mode(mode_manager.current_mode)

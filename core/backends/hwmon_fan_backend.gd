@@ -28,11 +28,13 @@ var _last_written_pwm: Dictionary = {}
 
 
 func _init() -> void:
-	logger = Log.get_logger("HwmonFanBackend")
+	logger = Log.get_logger("FanManager HwmonFanBackend")
 
 
 func is_supported() -> bool:
-	return not _get_or_discover_fans().is_empty()
+	var supported := not _get_or_discover_fans().is_empty()
+	logger.debug("is_supported() -> %s" % supported)
+	return supported
 
 
 func get_hardware_id() -> String:
@@ -43,7 +45,9 @@ func get_hardware_id() -> String:
 
 
 func list_fans() -> Array[String]:
-	return _get_or_discover_fans()
+	var fans := _get_or_discover_fans()
+	logger.debug("list_fans() -> %s" % fans)
+	return fans
 
 
 func get_bios_curve(_fan_id: String) -> Dictionary:
@@ -69,6 +73,8 @@ func set_mode(mode: String) -> bool:
 			logger.error("Unknown fan mode '%s'" % mode)
 			return false
 
+	logger.debug("set_mode('%s'): writing pwm_enable=%d to %s" % [mode, enable_value, fans])
+
 	var failed_fans: Array[String] = []
 	for fan_id in fans:
 		var parts := PwmIo.split_channel_fan_id(fan_id)
@@ -80,6 +86,7 @@ func set_mode(mode: String) -> bool:
 		logger.error("Failed to set mode '%s' for fan(s): %s" % [mode, ", ".join(failed_fans)])
 		return false
 
+	logger.debug("set_mode('%s') succeeded for all %d fan(s)" % [mode, fans.size()])
 	return true
 
 
@@ -94,11 +101,14 @@ func get_current_mode() -> String:
 	var raw := PwmIo.read_text(
 		"%s/pwm%d_enable" % [parts["device"], parts["channel"]]
 	).strip_edges()
+
+	var mode := ""
 	if raw == str(PwmEnable.MANUAL):
-		return "custom"
-	if raw == str(PwmEnable.AUTOMATIC):
-		return "bios"
-	return ""
+		mode = "custom"
+	elif raw == str(PwmEnable.AUTOMATIC):
+		mode = "bios"
+	logger.debug("get_current_mode(): pwm_enable='%s' (from %s) -> '%s'" % [raw, fans[0], mode])
+	return mode
 
 
 func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
@@ -119,9 +129,15 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 
 	var percent := _interpolate_curve(curve, temperature)
 	var pwm_value := _percent_to_pwm(percent)
+	logger.debug(
+		"apply_custom_curve(%s): temp=%.1f°C -> %.1f%% -> pwm=%d" % [fan_id, temperature, percent, pwm_value]
+	)
 
 	# Skip if the target hasn't changed since last time (runs every poll tick).
 	if _last_written_pwm.get(fan_id) == pwm_value:
+		logger.debug(
+			"apply_custom_curve(%s): pwm=%d unchanged since last write, skipping" % [fan_id, pwm_value]
+		)
 		return true
 
 	var parts := PwmIo.split_channel_fan_id(fan_id)
@@ -140,7 +156,9 @@ func read_temperature(fan_id: String) -> float:
 	if raw.is_empty():
 		logger.warn("Unable to read temp%d_input for %s" % [parts["channel"], fan_id])
 		return -1.0
-	return raw.to_float() / 1000.0
+	var celsius := raw.to_float() / 1000.0
+	logger.debug("read_temperature(%s) -> %.1f°C (raw='%s')" % [fan_id, celsius, raw])
+	return celsius
 
 
 func read_fan_percent(fan_id: String) -> float:
@@ -149,7 +167,9 @@ func read_fan_percent(fan_id: String) -> float:
 	if raw.is_empty():
 		logger.warn("Unable to read pwm%d for %s" % [parts["channel"], fan_id])
 		return -1.0
-	return _pwm_to_percent(raw.to_int())
+	var percent := _pwm_to_percent(raw.to_int())
+	logger.debug("read_fan_percent(%s) -> %.1f%% (raw='%s')" % [fan_id, percent, raw])
+	return percent
 
 
 ## Discovers hwmon devices exposing at least a matched pwm1/temp1_input
@@ -159,6 +179,8 @@ func read_fan_percent(fan_id: String) -> float:
 func _get_or_discover_fans() -> Array[String]:
 	if not _discovered_fans.is_empty():
 		return _discovered_fans
+
+	logger.debug("Discovering fans under %s" % HWMON_DIR)
 
 	var discovered: Array[String] = []
 	var dir := DirAccess.open(HWMON_DIR)
@@ -181,6 +203,10 @@ func _get_or_discover_fans() -> Array[String]:
 			)
 
 			var channels := _resolve_fan_channels(pwm_channels, temp_channels)
+			logger.debug(
+				"%s: pwm_channels=%s temp_channels=%s -> resolved=%s"
+				% [device_path, pwm_channels, temp_channels, channels]
+			)
 			if channels.size() > 1:
 				for channel in channels:
 					discovered.append("%s#%d" % [device_path, channel])
@@ -228,6 +254,7 @@ func _ensure_manual_mode(fan_id: String) -> bool:
 
 	var raw := _read_text(path).strip_edges()
 	if raw == str(PwmEnable.MANUAL):
+		logger.debug("%s already in manual pwm control" % fan_id)
 		return true
 
 	logger.info("Switching %s to manual pwm control before applying custom curve" % fan_id)

@@ -6,7 +6,7 @@ class_name FanBackend
 ## of hardware (e.g. generic hwmon, or a vendor-specific EC). Register
 ## new backends with [FanBackendRegistry].
 
-var logger := Log.get_logger("FanBackend")
+var logger := Log.get_logger("FanManager FanBackend")
 
 
 ## Returns true if this backend can control the current hardware.
