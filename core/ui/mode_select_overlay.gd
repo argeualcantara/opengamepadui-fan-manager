@@ -91,6 +91,21 @@ func _ready() -> void:
 	apply_button.pressed.connect(_on_apply_pressed)
 
 	_select_dropdown_for_mode(mode_manager.current_mode)
+	_fix_dropdown_focus_neighbor()
+
+
+## Dropdown doesn't hold focus itself: it redirects to its internal
+## OptionButton (dropdown.gd: `focus_entered.connect(_grab_focus)` ->
+## `option_button.grab_focus()`). Its own _ready() copies our
+## focus_neighbor_bottom (set correctly, in the .tscn, relative to
+## ModeDropdown itself) onto option_button VERBATIM, as a raw string —
+## but option_button sits one level deeper (ModeDropdown > OptionButton),
+## so the same relative path resolves to the wrong node from there (one
+## ".." short). get_path_to() recomputes it correctly, relative to
+## option_button's real position, overwriting the broken copy.
+func _fix_dropdown_focus_neighbor() -> void:
+	var option_button := mode_dropdown.option_button
+	option_button.focus_neighbor_bottom = option_button.get_path_to(per_game_toggle)
 
 
 ## Builds the dropdown items in MODE_LABELS order, skipping "OS Mode"
