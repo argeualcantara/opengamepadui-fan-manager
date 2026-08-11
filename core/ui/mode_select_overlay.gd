@@ -36,7 +36,6 @@ const FAN_TAB_SCENE := preload("res://plugins/fan-manager/core/ui/components/fan
 ## dropdown in _populate_mode_dropdown().
 const MODE_LABELS := {
 	"bios": "BIOS Mode",
-	"os": "OS Mode",
 	"custom": "Custom Mode",
 }
 
@@ -65,9 +64,8 @@ var _fan_editors: Dictionary = {}
 var _fan_tab_buttons: Dictionary = {}
 var _fans_built := false
 
-## dropdown item index -> mode_id. Rebuilt by _populate_mode_dropdown();
-## "os" is only added when the backend supports it, so index doesn't
-## always line up 1:1 with MODE_LABELS.
+## dropdown item index -> mode_id, in MODE_LABELS order. Rebuilt by
+## _populate_mode_dropdown().
 var _mode_ids: Array[String] = []
 
 
@@ -108,17 +106,11 @@ func _fix_dropdown_focus_neighbor() -> void:
 	option_button.focus_neighbor_bottom = option_button.get_path_to(per_game_toggle)
 
 
-## Builds the dropdown items in MODE_LABELS order, skipping "OS Mode"
-## entirely on hardware that doesn't support it (REQUIREMENTS.md §2.2:
-## hide/disable when unavailable; omitting the item is simpler than a
-## disabled OptionButton entry and matches what the old OsCard.visible
-## = false did).
+## Builds the dropdown items in MODE_LABELS order.
 func _populate_mode_dropdown() -> void:
 	mode_dropdown.clear()
 	_mode_ids.clear()
 	for mode_id in MODE_LABELS:
-		if mode_id == "os" and not mode_manager.backend.supports_os_mode():
-			continue
 		mode_dropdown.add_item(MODE_LABELS[mode_id])
 		_mode_ids.append(mode_id)
 

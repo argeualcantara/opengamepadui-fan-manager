@@ -11,16 +11,6 @@ func test_requires_software_polling_is_false() -> void:
 	assert_false(backend.requires_software_polling())
 
 
-func test_supports_os_mode_is_false() -> void:
-	# pwm1_enable has no distinct "OS-managed" value on this driver:
-	# see the AsusPwmEnable doc comment for the kernel-source rationale.
-	assert_false(backend.supports_os_mode())
-
-
-func test_set_mode_rejects_os() -> void:
-	assert_false(backend.set_mode("os"))
-
-
 func test_set_mode_rejects_unknown_mode() -> void:
 	assert_false(backend.set_mode("turbo"))
 
@@ -88,18 +78,10 @@ func test_validate_and_clamp_accepts_string_keys_from_json() -> void:
 	assert_false(validated.has("10"))
 
 
-func test_split_fan_id_extracts_device_and_channel() -> void:
-	var parts := backend._split_fan_id("/sys/class/hwmon/hwmon7#2")
-	assert_eq(parts["device"], "/sys/class/hwmon/hwmon7")
-	assert_eq(parts["channel"], 2)
-
-
-func test_split_fan_id_defaults_channel_1_for_a_bare_device_path() -> void:
-	# Tolerates an old-format fan_id (no "#channel") instead of hard
-	# failing, in case one still reaches this backend somehow.
-	var parts := backend._split_fan_id("/sys/class/hwmon/hwmon7")
-	assert_eq(parts["device"], "/sys/class/hwmon/hwmon7")
-	assert_eq(parts["channel"], 1)
+# split_channel_fan_id() itself now lives on PwmIo (shared with
+# HwmonFanBackend's own multi-fan discovery): see pwm_io_test.gd for
+# its coverage. Nothing left here to test that's specific to this
+# backend's use of it.
 
 
 func test_get_fan_label_falls_back_to_generic_name_when_unreadable() -> void:
