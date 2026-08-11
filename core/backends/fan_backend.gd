@@ -51,20 +51,14 @@ func get_bios_curve(_fan_id: String) -> Dictionary:
 	return {}
 
 
-## Returns true if this hardware exposes a fan curve controlled by the
-## operating system, distinct from BIOS and custom modes.
-func supports_os_mode() -> bool:
-	return false
-
-
-## Switches the backend into the given mode ("bios", "os", or "custom").
+## Switches the backend into the given mode ("bios" or "custom").
 ## Returns false if the mode is not supported or the switch failed.
 func set_mode(_mode: String) -> bool:
 	return false
 
 
 ## Reads which mode the hardware is *currently* configured for
-## ("bios"/"os"/"custom"), without writing anything. Returns "" if it
+## ("bios"/"custom"), without writing anything. Returns "" if it
 ## can't be determined. Used on a genuinely first run (no persisted
 ## active_mode yet) to adopt whatever the hardware/BIOS already had
 ## configured instead of overwriting it with an assumed default.

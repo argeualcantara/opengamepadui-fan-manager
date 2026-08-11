@@ -7,7 +7,7 @@ class_name FanCurveStore
 ## REQUIREMENTS.md §3 for the document schema:
 ## {
 ##   "hardware_id": "...",
-##   "active_mode": "bios" | "os" | "custom",
+##   "active_mode": "bios" | "custom",
 ##   "active_profile": "<name>" | null,
 ##   "profiles": { "<name>": { "<temp>": <percent>, ... }, ... }
 ## }
