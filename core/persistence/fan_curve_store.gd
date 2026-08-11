@@ -34,13 +34,15 @@ class_name FanCurveStore
 
 const DATA_DIR := "user://data/fan-manager"
 
-var logger := Log.get_logger("FanCurveStore")
+var logger := Log.get_logger("FanManager FanCurveStore")
 
 
 ## Returns true if a document has already been saved for hardware_id
 ## (vs. a genuinely first run).
 func exists(hardware_id: String) -> bool:
-	return FileAccess.file_exists(_path_for(hardware_id))
+	var result := FileAccess.file_exists(_path_for(hardware_id))
+	logger.debug("exists('%s') -> %s" % [hardware_id, result])
+	return result
 
 
 ## Returns the persisted document for hardware_id, or a fresh default
@@ -50,6 +52,7 @@ func load_data(hardware_id: String) -> Dictionary:
 	var path := _path_for(hardware_id)
 
 	if not FileAccess.file_exists(path):
+		logger.debug("load_data('%s'): %s doesn't exist yet, returning defaults" % [hardware_id, path])
 		return _default_data(hardware_id)
 
 	var file := FileAccess.open(path, FileAccess.READ)
@@ -57,11 +60,13 @@ func load_data(hardware_id: String) -> Dictionary:
 		logger.error("Unable to open %s for reading" % path)
 		return _default_data(hardware_id)
 
-	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	var raw_text := file.get_as_text()
+	var parsed: Variant = JSON.parse_string(raw_text)
 	if typeof(parsed) != TYPE_DICTIONARY:
 		logger.error("Corrupt fan curve data at %s, falling back to defaults" % path)
 		return _default_data(hardware_id)
 
+	logger.debug("load_data('%s') <- %s" % [hardware_id, path])
 	return parsed as Dictionary
 
 
@@ -70,6 +75,7 @@ func load_data(hardware_id: String) -> Dictionary:
 func save(hardware_id: String, data: Dictionary) -> bool:
 	var path := _path_for(hardware_id)
 	var dir_path := path.get_base_dir()
+	logger.debug("save('%s') -> %s: keys=%s" % [hardware_id, path, data.keys()])
 
 	var mkdir_err := DirAccess.make_dir_recursive_absolute(dir_path)
 	if mkdir_err != OK and mkdir_err != ERR_ALREADY_EXISTS:
@@ -90,6 +96,7 @@ func save(hardware_id: String, data: Dictionary) -> bool:
 		logger.error("Unable to rename %s -> %s (error %d)" % [tmp_path, path, rename_err])
 		return false
 
+	logger.debug("save('%s'): wrote %s -> %s" % [hardware_id, tmp_path, path])
 	logger.info("Saved fan curve data for hardware '%s'" % hardware_id)
 	return true
 
@@ -101,6 +108,8 @@ func save_profile(hardware_id: String, name: String, curve: Dictionary) -> bool:
 	if name.is_empty():
 		logger.error("Cannot save a profile with an empty name")
 		return false
+
+	logger.debug("save_profile('%s', '%s'): %s" % [hardware_id, name, curve])
 
 	var data := load_data(hardware_id)
 	var profiles: Dictionary = data.get("profiles")
@@ -131,8 +140,14 @@ func delete_profile(hardware_id: String, name: String) -> bool:
 
 	profiles.erase(name)
 	data["profiles"] = profiles
-	if data.get("active_profile") == name:
+	var was_active: bool = data.get("active_profile") == name
+	if was_active:
 		data["active_profile"] = null
+
+	logger.debug(
+		"delete_profile('%s', '%s'): was_active=%s, %d profile(s) remaining"
+		% [hardware_id, name, was_active, profiles.size()]
+	)
 
 	var saved := save(hardware_id, data)
 	if saved:
@@ -151,6 +166,7 @@ func list_profiles(hardware_id: String) -> Array[String]:
 	var names: Array[String] = []
 	for profile_name in profiles.keys():
 		names.append(profile_name)
+	logger.debug("list_profiles('%s') -> %s" % [hardware_id, names])
 	return names
 
 

@@ -19,7 +19,7 @@ const ProfileManagerPanel = preload("res://plugins/fan-manager/core/ui/component
 
 const STEAM_HOME_KEY := "__steam_home__"
 
-var logger := Log.get_logger("GameCurveManager")
+var logger := Log.get_logger("FanManager GameCurveManager")
 
 ## Untyped on purpose: only used via .app_switched/.get_current_app()
 ## (duck-typed), so tests can pass a lightweight double instead of
@@ -72,6 +72,11 @@ func _ready() -> void:
 	profiles_panel.active_profile_changed.connect(_on_state_changed)
 	_sync_curve_engine_connections()
 
+	logger.debug(
+		"_ready(): active_game_context='%s' per_game_enabled=%s"
+		% [active_game_context, data.get("per_game_enabled", false)]
+	)
+
 	# Re-applies the persisted toggle on load, same as flipping it on mid-session.
 	per_game_enabled = data.get("per_game_enabled", false)
 
@@ -79,6 +84,7 @@ func _ready() -> void:
 ## Signal handler for launch_manager.app_switched. to is the newly
 ## running app (or null for the Steam home screen).
 func _on_app_switched(_from, to) -> void:
+	logger.debug("app_switched -> %s" % (to.launch_item.name if to != null and to.launch_item else "(steam home)"))
 	_apply_or_track(to)
 
 
@@ -92,9 +98,17 @@ func _on_mode_changed(_mode: String) -> void:
 ## Connects curve_changed on every current CustomCurveEngine to
 ## _on_curve_changed, skipping engines already connected.
 func _sync_curve_engine_connections() -> void:
-	for engine in mode_manager.get_all_curve_engines().values():
+	var engines := mode_manager.get_all_curve_engines()
+	var newly_connected := 0
+	for engine in engines.values():
 		if not engine.curve_changed.is_connected(_on_curve_changed):
 			engine.curve_changed.connect(_on_curve_changed)
+			newly_connected += 1
+	if newly_connected > 0:
+		logger.debug(
+			"_sync_curve_engine_connections(): connected %d new engine(s), %d total"
+			% [newly_connected, engines.size()]
+		)
 
 
 ## Signal handler for mode_changed/active_profile_changed: any relevant
@@ -120,14 +134,16 @@ func _apply_or_track(to) -> void:
 	_persist_active_context(context_key)
 
 	if not per_game_enabled:
+		logger.debug("_apply_or_track('%s'): per_game_enabled is off, tracking only" % context_key)
 		return
 
 	var data: Dictionary = store.load_data(hardware_id)
 	var game_curves: Dictionary = data.get("game_curves", {})
 	if game_curves.has(context_key):
+		logger.debug("_apply_or_track('%s'): found saved config, applying" % context_key)
 		_apply_context(game_curves[context_key])
-	# else: no saved config, leave state as-is; starts getting captured
-	# from the next state change onward.
+	else:
+		logger.debug("_apply_or_track('%s'): no saved config, leaving state as-is" % context_key)
 
 
 ## Applies a saved context config ({mode, active_profile, curve}):
@@ -135,6 +151,7 @@ func _apply_or_track(to) -> void:
 ## valid) or loads the raw per-fan curve directly into each engine.
 func _apply_context(saved: Dictionary) -> void:
 	var mode: String = saved.get("mode", "")
+	logger.debug("_apply_context('%s'): %s" % [active_game_context, saved])
 	if mode.is_empty():
 		return
 
@@ -157,11 +174,13 @@ func _apply_context(saved: Dictionary) -> void:
 		profiles = {}
 
 	if profile_name != null and profiles.has(profile_name):
+		logger.debug("_apply_context('%s'): applying saved profile '%s'" % [active_game_context, profile_name])
 		profiles_panel.apply_profile(profile_name)
 		return
 
 	var curve: Dictionary = saved.get("curve", {})
 	var engines := mode_manager.get_all_curve_engines()
+	logger.debug("_apply_context('%s'): loading raw per-fan curve %s" % [active_game_context, curve])
 	for fan_id in curve:
 		if engines.has(fan_id):
 			engines[fan_id].load_curve(curve[fan_id])
@@ -176,6 +195,7 @@ func _snapshot_and_save() -> void:
 
 	var engines := mode_manager.get_all_curve_engines()
 	if engines.is_empty():
+		logger.debug("_snapshot_and_save('%s'): no curve engines yet, skipping" % active_game_context)
 		return
 
 	var curve: Dictionary = {}
@@ -191,11 +211,15 @@ func _snapshot_and_save() -> void:
 	}
 	data["game_curves"] = game_curves
 	store.save(hardware_id, data)
-	logger.debug("Saved per-game config for context '%s'" % active_game_context)
+	logger.debug(
+		"Saved per-game config for context '%s': mode='%s' active_profile=%s"
+		% [active_game_context, mode_manager.current_mode, data.get("active_profile")]
+	)
 
 
 ## Persists the per_game_enabled toggle to disk.
 func _persist_enabled(value: bool) -> void:
+	logger.debug("Persisting per_game_enabled=%s" % value)
 	var data: Dictionary = store.load_data(hardware_id)
 	data["per_game_enabled"] = value
 	store.save(hardware_id, data)
@@ -203,6 +227,7 @@ func _persist_enabled(value: bool) -> void:
 
 ## Persists context_key as the active game context to disk.
 func _persist_active_context(context_key: String) -> void:
+	logger.debug("Persisting active_game_context='%s'" % context_key)
 	var data: Dictionary = store.load_data(hardware_id)
 	data["active_game_context"] = context_key
 	store.save(hardware_id, data)
