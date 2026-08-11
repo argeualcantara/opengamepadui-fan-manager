@@ -52,6 +52,17 @@ func _ready() -> void:
 	focus_exited.connect(_on_unfocus)
 	mouse_entered.connect(_on_focus)
 	mouse_exited.connect(_on_unfocus)
+	theme_changed.connect(_on_theme_changed)
+	_on_theme_changed()
+
+
+## Mirrors card_button.gd: TextureRect.texture isn't a themed property
+## Godot applies automatically, so the "highlight" icon has to be
+## fetched and assigned manually (see mode_option_card.gd).
+func _on_theme_changed() -> void:
+	var highlight_texture := get_theme_icon("highlight", "CardButton")
+	if highlight_texture:
+		highlight.texture = highlight_texture
 
 
 func _update_label() -> void:
