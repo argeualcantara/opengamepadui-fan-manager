@@ -11,7 +11,7 @@ class_name PwmIo
 ## toggle yet — flip manually here once logged writes look correct.
 static var dry_run := true
 
-static var logger := Log.get_logger("FanManager PwmIo")
+static var logger := Log.get_logger("FanManager PwmIo", Log.LEVEL.DEBUG)
 
 
 ## Splits a "<device>#<channel>" fan_id into {"device": ..., "channel":
@@ -49,6 +49,7 @@ static func read_text(path: String) -> String:
 	f.close()
 	var as_text := bytes.get_string_from_utf8().replace("\n", "")
 	logger.debug("read_text('%s') -> '%s'" % [path, as_text])
+	logger.warn("read_text('%s') -> '%s'" % [path, as_text])
 	return as_text
 
 

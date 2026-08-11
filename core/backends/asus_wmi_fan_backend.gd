@@ -30,7 +30,7 @@ var _discovered_fans: Array[String] = []
 
 
 func _init() -> void:
-	logger = Log.get_logger("FanManager AsusWmiFanBackend")
+	logger = Log.get_logger("FanManager AsusWmiFanBackend", Log.LEVEL.DEBUG)
 
 
 func is_supported() -> bool:
@@ -275,7 +275,10 @@ func _get_or_discover_fans() -> Array[String]:
 			var name := PwmIo.read_text(device_path + "/name").strip_edges()
 			seen.append("%s -> '%s'" % [entry, name])
 			if name == HWMON_NAME:
+				logger.debug("hwmon found %s in %s" % [HWMON_NAME, HWMON_DIR])
 				for channel in range(1, MAX_FAN_CHANNELS + 1):
+					var pwm_path_channel = "%s/pwm%d_enable" % [device_path, channel]
+					logger.debug("checking PWM_ENABLE_PATH -> %s" % pwm_path_channel)
 					if FileAccess.file_exists("%s/pwm%d_enable" % [device_path, channel]):
 						discovered.append("%s#%d" % [device_path, channel])
 		entry = dir.get_next()

@@ -25,7 +25,7 @@ signal active_profile_changed(profile_name: String)
 
 const ROW_SCENE := preload("res://plugins/fan-manager/core/ui/components/profile_row.tscn")
 
-var logger := Log.get_logger("FanManager ProfileManagerPanel")
+var logger := Log.get_logger("FanManager ProfileManagerPanel", Log.LEVEL.DEBUG)
 
 var store: FanCurveStore
 var hardware_id: String = ""

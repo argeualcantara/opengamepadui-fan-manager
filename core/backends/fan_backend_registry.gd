@@ -10,7 +10,7 @@ class_name FanBackendRegistry
 const FanBackend = preload("res://plugins/fan-manager/core/backends/fan_backend.gd")
 const HardwareId = preload("res://plugins/fan-manager/core/backends/hardware_id.gd")
 
-var logger := Log.get_logger("FanManager FanBackendRegistry")
+var logger := Log.get_logger("FanManager FanBackendRegistry", Log.LEVEL.DEBUG)
 
 var _backends: Array[FanBackend] = []
 
