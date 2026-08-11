@@ -37,7 +37,7 @@ const MODE_LABELS := {
 
 var mode_manager: FanModeManager
 
-var logger := Log.get_logger("FanManager ModeSelectOverlay", Log.LEVEL.DEBUG)
+var logger := Log.get_logger("FanManager ModeSelectOverlay")
 
 @onready var mode_dropdown := $%ModeDropdown as Dropdown
 @onready var error_label := $%ErrorLabel as Label

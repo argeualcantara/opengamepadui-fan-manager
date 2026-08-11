@@ -34,7 +34,7 @@ class_name FanCurveStore
 
 const DATA_DIR := "user://data/fan-manager"
 
-var logger := Log.get_logger("FanManager FanCurveStore", Log.LEVEL.DEBUG)
+var logger := Log.get_logger("FanManager FanCurveStore")
 
 
 ## Returns true if a document has already been saved for hardware_id

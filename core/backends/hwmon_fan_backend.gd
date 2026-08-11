@@ -28,7 +28,7 @@ var _last_written_pwm: Dictionary = {}
 
 
 func _init() -> void:
-	logger = Log.get_logger("FanManager HwmonFanBackend", Log.LEVEL.DEBUG)
+	logger = Log.get_logger("FanManager HwmonFanBackend")
 
 
 func is_supported() -> bool:

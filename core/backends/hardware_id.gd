@@ -15,7 +15,7 @@ const DMI_BOARD_NAME := "/sys/class/dmi/id/board_name"
 ## Returns a stable id derived from DMI product/board name, or
 ## [constant UNKNOWN] if neither is readable.
 static func from_dmi() -> String:
-	var logger := Log.get_logger("FanManager HardwareId", Log.LEVEL.DEBUG)
+	var logger := Log.get_logger("FanManager HardwareId")
 	var product := _read_text(DMI_PRODUCT_NAME).strip_edges()
 	var board := _read_text(DMI_BOARD_NAME).strip_edges()
 	logger.debug(

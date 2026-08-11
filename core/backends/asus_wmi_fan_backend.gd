@@ -30,7 +30,7 @@ var _discovered_fans: Array[String] = []
 
 
 func _init() -> void:
-	logger = Log.get_logger("FanManager AsusWmiFanBackend", Log.LEVEL.DEBUG)
+	logger = Log.get_logger("FanManager AsusWmiFanBackend")
 
 
 func is_supported() -> bool:

@@ -19,7 +19,7 @@ const ProfileManagerPanel = preload("res://plugins/fan-manager/core/ui/component
 
 const STEAM_HOME_KEY := "__steam_home__"
 
-var logger := Log.get_logger("FanManager GameCurveManager", Log.LEVEL.DEBUG)
+var logger := Log.get_logger("FanManager GameCurveManager")
 
 ## Untyped on purpose: only used via .app_switched/.get_current_app()
 ## (duck-typed), so tests can pass a lightweight double instead of

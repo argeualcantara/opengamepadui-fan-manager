@@ -5,7 +5,7 @@ class_name FanCurveUtils
 ## FanBackend implementations and CustomCurveEngine so normalization
 ## logic isn't duplicated.
 
-static var logger := Log.get_logger("FanManager FanCurveUtils", Log.LEVEL.DEBUG)
+static var logger := Log.get_logger("FanManager FanCurveUtils")
 
 ## The 10 fixed temperature points the UI's curve editor always shows
 ## (10-100°C, step 10).

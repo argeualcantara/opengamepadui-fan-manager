@@ -18,7 +18,7 @@ signal mode_changed(mode: String)
 
 const VALID_MODES := ["bios", "custom"]
 
-var logger := Log.get_logger("FanManager FanModeManager", Log.LEVEL.DEBUG)
+var logger := Log.get_logger("FanManager FanModeManager")
 
 var registry: FanBackendRegistry
 var store: FanCurveStore

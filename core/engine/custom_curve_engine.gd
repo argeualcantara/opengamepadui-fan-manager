@@ -25,7 +25,7 @@ signal curve_changed(curve: Dictionary)
 
 const DEFAULT_POLL_INTERVAL_SEC := 2.0
 
-var logger := Log.get_logger("FanManager CustomCurveEngine", Log.LEVEL.DEBUG)
+var logger := Log.get_logger("FanManager CustomCurveEngine")
 
 var poll_interval_sec: float = DEFAULT_POLL_INTERVAL_SEC:
 	set(value):
