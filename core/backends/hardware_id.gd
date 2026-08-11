@@ -1,6 +1,8 @@
 extends RefCounted
 class_name HardwareId
 
+const PwmIo = preload("res://plugins/fan-manager/core/backends/pwm_io.gd")
+
 ## Shared hardware identification helper. Used by every FanBackend so
 ## the same physical machine always produces the same hardware_id
 ## regardless of which backend ends up controlling it (e.g. if
@@ -27,7 +29,4 @@ static func from_dmi() -> String:
 
 
 static func _read_text(path: String) -> String:
-	var file := FileAccess.open(path, FileAccess.READ)
-	if not file:
-		return ""
-	return file.get_as_text()
+	return PwmIo.read_text(path)
