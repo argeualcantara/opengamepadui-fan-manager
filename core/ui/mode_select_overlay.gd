@@ -104,10 +104,10 @@ func _ready() -> void:
 	apply_button.pressed.connect(_on_apply_pressed)
 
 	_select_dropdown_for_mode(mode_manager.current_mode)
-	_wire_dropdown_exit_focus()
 
 	focus_group.grab_focus.call_deferred()
 	_update_scroll_cap.call_deferred()
+	_wire_dropdown_exit_focus.call_deferred()
 
 
 ## The only cross-boundary focus link that can't be set declaratively
@@ -121,6 +121,13 @@ func _ready() -> void:
 ## mode_dropdown.focus_neighbor_bottom here would land on the outer
 ## wrapper, too late to matter, so this goes through
 ## mode_dropdown.option_button directly instead.
+##
+## Must be called deferred (see the call site in _ready()): PackedScene
+## .instantiate() runs _ready() on the whole subtree immediately, before
+## plugin.gd's add_to_quick_bar() has attached it to the live tree, and
+## get_path_to() below hard-errors ("not inside tree") when called
+## before that attachment happens. Same reason focus_group.grab_focus
+## and _update_scroll_cap are already deferred here too.
 func _wire_dropdown_exit_focus() -> void:
 	var dropdown_option := mode_dropdown.option_button
 	dropdown_option.focus_neighbor_bottom = dropdown_option.get_path_to(per_game_toggle)

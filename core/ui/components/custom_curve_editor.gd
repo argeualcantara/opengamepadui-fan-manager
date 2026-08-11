@@ -38,7 +38,14 @@ func _ready() -> void:
 		rows_container.add_child(row)
 		_rows.append(row)
 
-	_wire_focus_neighbors()
+	# Deferred: at this point in _ready(), this editor (instantiated via
+	# CURVE_EDITOR_SCENE.instantiate() in ModeSelectOverlay._ensure_fan_editors())
+	# hasn't been added to editors_container yet — that's the very next
+	# line back in the caller, which hasn't run. Every row here is
+	# still part of an orphan, not-yet-in-tree subtree, and
+	# get_path_to() (used below) hard-errors ("not inside tree") when
+	# called before attachment: defer past that.
+	_wire_focus_neighbors.call_deferred()
 
 	if engine:
 		_attach_to_engine()
