@@ -1,0 +1,120 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://plugins/fan-manager/core/ui/components/profile_manager_panel.gd" id="1"]
+[ext_resource type="LabelSettings" path="res://assets/label/subheading_label.tres" id="2"]
+[ext_resource type="PackedScene" path="res://plugins/fan-manager/core/ui/components/profile_trigger_button.tscn" id="3"]
+
+[node name="ProfileManagerPanel" type="VBoxContainer"]
+theme_override_constants/separation = 8
+script = ExtResource("1")
+
+[node name="Bar" type="HBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Trigger" parent="Bar" instance=ExtResource("3")]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SaveButton" type="Button" parent="Bar"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+text = "Save"
+
+[node name="NewNameForm" type="HBoxContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="NameInput" type="LineEdit" parent="NewNameForm"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Profile name"
+max_length = 30
+
+[node name="NewNameConfirm" type="Button" parent="NewNameForm"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Create"
+
+[node name="NewNameCancel" type="Button" parent="NewNameForm"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Cancel"
+
+[node name="OverwriteBox" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"InsidePanel"
+
+[node name="OverwriteMargin" type="MarginContainer" parent="OverwriteBox"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="OverwriteVBox" type="VBoxContainer" parent="OverwriteBox/OverwriteMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="OverwriteLabel" type="Label" parent="OverwriteBox/OverwriteMargin/OverwriteVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = ""
+label_settings = ExtResource("2")
+autowrap_mode = 3
+
+[node name="OverwriteButtons" type="HBoxContainer" parent="OverwriteBox/OverwriteMargin/OverwriteVBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="OverwriteConfirmButton" type="Button" parent="OverwriteBox/OverwriteMargin/OverwriteVBox/OverwriteButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Overwrite"
+
+[node name="OverwriteCancelButton" type="Button" parent="OverwriteBox/OverwriteMargin/OverwriteVBox/OverwriteButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Cancel"
+
+[node name="Dropdown" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"InsidePanel"
+
+[node name="DropdownMargin" type="MarginContainer" parent="Dropdown"]
+layout_mode = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 6
+
+[node name="DropdownVBox" type="VBoxContainer" parent="Dropdown/DropdownMargin"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="ProfileList" type="VBoxContainer" parent="Dropdown/DropdownMargin/DropdownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="EmptyLabel" type="Label" parent="Dropdown/DropdownMargin/DropdownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "No saved profiles yet."
+label_settings = ExtResource("2")
+autowrap_mode = 3
+
+[node name="NewProfileButton" type="Button" parent="Dropdown/DropdownMargin/DropdownVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+flat = true
+text = "+ New profile"

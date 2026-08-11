@@ -1,0 +1,14 @@
+{
+  "plugin.id": "fan-manager",
+  "plugin.name": "Fan Manager",
+  "plugin.version": "0.1.0",
+  "plugin.min-api-version": "2.0.0",
+  "plugin.link": "",
+  "plugin.source": "",
+  "plugin.description": "Monitor and control system fan curves from OpenGamepadUI.",
+  "store.tags": ["hardware", "fan", "cooling", "quick-bar"],
+  "store.images": [],
+  "author.name": "",
+  "author.email": "",
+  "entrypoint": "plugin.gd"
+}

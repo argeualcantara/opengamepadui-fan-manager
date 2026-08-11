@@ -1,0 +1,105 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://plugins/fan-manager/core/ui/mode_select_overlay.gd" id="1"]
+[ext_resource type="LabelSettings" path="res://assets/label/subheading_label.tres" id="3"]
+[ext_resource type="PackedScene" path="res://core/systems/input/focus_group.tscn" id="4"]
+[ext_resource type="PackedScene" path="res://plugins/fan-manager/core/ui/components/mode_option_card.tscn" id="5"]
+[ext_resource type="PackedScene" path="res://plugins/fan-manager/core/ui/components/profile_manager_panel.tscn" id="7"]
+
+[node name="ModeSelectOverlay" type="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 16
+script = ExtResource("1")
+
+[node name="HeaderRow" type="HBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SectionLabel" type="Label" parent="HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Fan Manager"
+
+[node name="DirtyBadge" type="Label" parent="HeaderRow"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(1, 0.721569, 0.423529, 1)
+text = "Unsaved"
+label_settings = ExtResource("3")
+
+[node name="NoBackendLabel" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+text = "No fan control available on this hardware."
+label_settings = ExtResource("3")
+autowrap_mode = 3
+
+[node name="ModeList" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="FocusGroup" parent="ModeList" node_paths=PackedStringArray("current_focus") instance=ExtResource("4")]
+unique_name_in_owner = true
+current_focus = NodePath("../BiosCard")
+
+[node name="BiosCard" parent="ModeList" instance=ExtResource("5")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="OsCard" parent="ModeList" instance=ExtResource("5")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="CustomCard" parent="ModeList" instance=ExtResource("5")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="PerGameToggle" type="CheckBox" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Enable per game config"
+
+[node name="ErrorLabel" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.333333, 0.333333, 1)
+text = "Unable to switch mode."
+label_settings = ExtResource("3")
+autowrap_mode = 3
+
+[node name="CustomEditorSlot" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"InsidePanel"
+
+[node name="CustomEditorMargin" type="MarginContainer" parent="CustomEditorSlot"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="CustomEditorRoot" type="VBoxContainer" parent="CustomEditorSlot/CustomEditorMargin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ProfilesPanel" parent="CustomEditorSlot/CustomEditorMargin/CustomEditorRoot" instance=ExtResource("7")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="FanTabsBar" type="HBoxContainer" parent="CustomEditorSlot/CustomEditorMargin/CustomEditorRoot"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="EditorsContainer" type="Control" parent="CustomEditorSlot/CustomEditorMargin/CustomEditorRoot"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 260)
+layout_mode = 2
