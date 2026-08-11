@@ -240,6 +240,10 @@ func _wire_focus_into_curve_editor(first_fan_id: String) -> void:
 
 	apply_button.focus_neighbor_bottom = apply_button.get_path_to(entry_point)
 	entry_point.focus_neighbor_top = entry_point.get_path_to(apply_button)
+	logger.info(
+		"Wired ApplyButton <-> %s (focus_neighbor_bottom=%s)"
+		% [entry_point.name, apply_button.focus_neighbor_bottom]
+	)
 
 
 ## Re-links every fan tab's "down" and the newly-selected editor's
