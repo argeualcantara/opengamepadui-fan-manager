@@ -153,12 +153,33 @@ func bind_game_curve_manager(manager: GameCurveManager) -> void:
 	game_curve_manager = manager
 	per_game_toggle.button_pressed = manager.per_game_enabled
 	per_game_toggle.toggled.connect(_on_per_game_toggled)
+	manager.curve_applied.connect(_on_curve_applied)
 
 
 ## Signal handler for the per-game Toggle.
 func _on_per_game_toggled(pressed: bool) -> void:
 	if game_curve_manager:
 		game_curve_manager.per_game_enabled = pressed
+
+
+## Signal handler for GameCurveManager.curve_applied: CustomCurveEngine.
+## load_curve() doesn't emit curve_changed, so the visible sliders
+## wouldn't otherwise pick up a per-context curve switch (see
+## curve_applied's doc comment). Re-binding forces each editor to
+## re-pull and redraw the engine's current curve.
+func _on_curve_applied() -> void:
+	if mode_manager.current_mode != "custom":
+		return
+	_resync_fan_editors()
+
+
+## Re-pulls each built CustomCurveEditor's displayed curve from its
+## bound engine.
+func _resync_fan_editors() -> void:
+	var engines := mode_manager.get_all_curve_engines()
+	for fan_id in _fan_editors:
+		if engines.has(fan_id):
+			(_fan_editors[fan_id] as CustomCurveEditor).bind_engine(engines[fan_id])
 
 
 ## Commits whatever's currently on the sliders (the draft curve) to
@@ -184,13 +205,9 @@ func _select_dropdown_for_mode(mode: String) -> void:
 		return
 
 	_ensure_fan_editors()
+	_resync_fan_editors()
 
-	var engines := mode_manager.get_all_curve_engines()
-	for fan_id in _fan_editors:
-		if engines.has(fan_id):
-			(_fan_editors[fan_id] as CustomCurveEditor).bind_engine(engines[fan_id])
-
-	profiles_panel.refresh(mode_manager.store, mode_manager.hardware_id, engines)
+	profiles_panel.refresh(mode_manager.store, mode_manager.hardware_id, mode_manager.get_all_curve_engines())
 
 	# Re-applied every time Custom Mode turns on: idempotent, and cheap
 	# insurance against ApplyButton's neighbor going stale.

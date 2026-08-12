@@ -5,25 +5,44 @@ class_name FanBackend
 ## Base class for fan control backends: one implementation per family
 ## of hardware (e.g. generic hwmon, or a vendor-specific EC). Register
 ## new backends with [FanBackendRegistry].
+##
+## is_supported(), get_hardware_id(), list_fans() and _write_text() are
+## implemented here because they were 100% identical, byte-for-byte,
+## between AsusWmiFanBackend and HwmonFanBackend — every other method
+## (mode switching, curve application, fan discovery) differs enough
+## between backends that it's left for each subclass to implement.
+
+## Referenced via preload()'d consts, not bare class_name lookups:
+## OGUI loads plugins from a zip, so the global class_name cache is
+## never populated.
+const HardwareId = preload("res://plugins/fan-manager/core/backends/hardware_id.gd")
+const PwmIo = preload("res://plugins/fan-manager/core/backends/pwm_io.gd")
 
 var logger := Log.get_logger("FanManager FanBackend")
 
 
 ## Returns true if this backend can control the current hardware.
 func is_supported() -> bool:
-	return false
+	var supported := not _get_or_discover_fans().is_empty()
+	logger.debug("is_supported() -> %s" % supported)
+	return supported
 
 
 ## Returns a stable id for the detected hardware, used as the
 ## persistence key for saved fan curves (e.g. DMI product/board name).
 func get_hardware_id() -> String:
-	return ""
+	var hardware_id := HardwareId.from_dmi()
+	if hardware_id == HardwareId.UNKNOWN:
+		logger.warn("Unable to read DMI product/board name, using generic hardware id")
+	return hardware_id
 
 
 ## Returns the ids of the controllable fans on this hardware. May
 ## return more than one; callers must not assume size() == 1.
 func list_fans() -> Array[String]:
-	return []
+	var fans := _get_or_discover_fans()
+	logger.debug("list_fans() -> %s" % [fans])
+	return fans
 
 
 ## Human-readable label for fan_id (e.g. "CPU", "GPU"). Falls back to
@@ -76,3 +95,20 @@ func read_fan_percent(_fan_id: String) -> float:
 ## to true.
 func requires_software_polling() -> bool:
 	return true
+
+
+## Discovers and returns the ids of controllable fans on this hardware.
+## Every backend has a different discovery strategy, so this must be
+## overridden per-backend. Implementations are expected to cache their
+## result (is_supported() and list_fans() above call it unconditionally).
+func _get_or_discover_fans() -> Array[String]:
+	return []
+
+
+func _write_text(path: String, text: String) -> bool:
+	var wrote := PwmIo.write_text(path, text)
+	if wrote and not PwmIo.dry_run:
+		logger.debug("Wrote '%s' to %s" % [text, path])
+	elif not wrote:
+		logger.error("Unable to write to %s (permission denied or missing udev rule?)" % path)
+	return wrote
