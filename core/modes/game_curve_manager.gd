@@ -147,8 +147,13 @@ func _apply_or_track(to) -> void:
 
 
 ## Applies a saved context config ({mode, active_profile, curve}):
-## switches mode, then either applies the named profile (if still
-## valid) or loads the raw per-fan curve directly into each engine.
+## switches mode, then loads the raw per-fan curve directly into each
+## engine. Deliberately does NOT apply by active_profile's name: with
+## the profile picker UI hidden, every context shares the same single
+## "Default" profile record, so applying by name would load whichever
+## context last overwrote it instead of this context's own curve.
+## saved["curve"] is captured live per-context (see _snapshot_and_save())
+## and is the only thing that actually isolates one context from another.
 func _apply_context(saved: Dictionary) -> void:
 	var mode: String = saved.get("mode", "")
 	logger.debug("_apply_context('%s'): %s" % [active_game_context, saved])
@@ -165,17 +170,6 @@ func _apply_context(saved: Dictionary) -> void:
 	logger.info("Applied per-game config for context '%s'" % active_game_context)
 
 	if mode != "custom":
-		return
-
-	var profile_name = saved.get("active_profile")
-	var data: Dictionary = store.load_data(hardware_id)
-	var profiles: Dictionary = data.get("profiles")
-	if profiles == null:
-		profiles = {}
-
-	if profile_name != null and profiles.has(profile_name):
-		logger.debug("_apply_context('%s'): applying saved profile '%s'" % [active_game_context, profile_name])
-		profiles_panel.apply_profile(profile_name)
 		return
 
 	var curve: Dictionary = saved.get("curve", {})
