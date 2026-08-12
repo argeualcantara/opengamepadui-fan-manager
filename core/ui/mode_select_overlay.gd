@@ -23,6 +23,7 @@ const ProfileManagerPanel = preload("res://plugins/fan-manager/core/ui/component
 const GameCurveManager = preload("res://plugins/fan-manager/core/modes/game_curve_manager.gd")
 const CustomCurveEditor = preload("res://plugins/fan-manager/core/ui/components/custom_curve_editor.gd")
 const FanTabButton = preload("res://plugins/fan-manager/core/ui/components/fan_tab_button.gd")
+const FanBackend = preload("res://plugins/fan-manager/core/backends/fan_backend.gd")
 
 const CURVE_EDITOR_SCENE := preload("res://plugins/fan-manager/core/ui/components/custom_curve_editor.tscn")
 const FAN_TAB_SCENE := preload("res://plugins/fan-manager/core/ui/components/fan_tab_button.tscn")
@@ -65,13 +66,29 @@ var _fans_built := false
 var _mode_ids: Array[String] = []
 
 
-## Shows the empty state if no backend is available, otherwise wires
-## the mode dropdown/toggle/apply signals and selects the current mode.
+## Shows the empty state if no backend is available yet, otherwise
+## wires the mode dropdown/toggle/apply signals and selects the
+## current mode. Backend detection retries in the background (see
+## FanModeManager._ready()), so .backend may still be null here even
+## though it'll be found a moment later — backend_ready re-runs this
+## setup once detection actually settles.
 func _ready() -> void:
 	error_label.visible = false
 	profiles_panel.dirty_changed.connect(_on_dirty_changed)
 
-	if not mode_manager or not mode_manager.backend:
+	if mode_manager:
+		mode_manager.backend_ready.connect(_on_backend_ready)
+
+	_apply_backend_state(mode_manager.backend if mode_manager else null)
+
+
+## Signal handler for FanModeManager.backend_ready.
+func _on_backend_ready(backend: FanBackend) -> void:
+	_apply_backend_state(backend)
+
+
+func _apply_backend_state(backend: FanBackend) -> void:
+	if not backend:
 		logger.warn("No FanModeManager/backend available; showing empty state")
 		mode_dropdown.visible = false
 		per_game_toggle.visible = false
