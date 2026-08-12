@@ -16,20 +16,7 @@ const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_cu
 
 signal mode_changed(mode: String)
 
-## Fired once backend detection settles (with the found backend, or
-## null if none matched after retries). Plugin/UI code that needs to
-## react to a backend found only after a retry (not synchronously in
-## _ready()) should connect to this instead of reading .backend
-## directly right after construction.
-signal backend_ready(backend: FanBackend)
-
 const VALID_MODES := ["bios", "custom"]
-
-## Bounded retries for backend detection: hwmon may not be populated
-## yet this early in boot (see AsusWmiFanBackend._get_or_discover_fans()'s
-## doc comment). Total worst-case wait: ~2.5s.
-const BACKEND_DETECT_RETRIES := 5
-const BACKEND_DETECT_RETRY_DELAY := 0.5
 
 var logger := Log.get_logger("FanManager FanModeManager")
 
@@ -51,10 +38,9 @@ func _init(p_registry: FanBackendRegistry, p_store: FanCurveStore) -> void:
 
 
 func _ready() -> void:
-	backend = await _detect_backend_with_retry()
+	backend = registry.detect()
 	if not backend:
 		logger.warn("No fan backend available; fan mode management disabled")
-		backend_ready.emit(null)
 		return
 
 	hardware_id = backend.get_hardware_id()
@@ -64,7 +50,6 @@ func _ready() -> void:
 		# First run for this hardware: adopt whatever mode it's already
 		# in instead of writing an assumed default.
 		_adopt_current_hardware_mode()
-		backend_ready.emit(backend)
 		return
 
 	var data: Dictionary = store.load_data(hardware_id)
@@ -77,29 +62,6 @@ func _ready() -> void:
 			"Failed to reapply saved mode '%s' on startup, falling back to bios" % saved_mode
 		)
 		set_mode("bios")
-
-	# Emitted only once current_mode is fully resolved (adopted or
-	# reapplied above): listeners like ModeSelectOverlay read
-	# .current_mode synchronously off the back of this signal.
-	backend_ready.emit(backend)
-
-
-## Retries registry.detect() a few times with a delay in between:
-## hwmon may not be populated yet on the first attempt this early in
-## boot. Returns as soon as a backend is found, or null once retries
-## are exhausted.
-func _detect_backend_with_retry() -> FanBackend:
-	for attempt in range(BACKEND_DETECT_RETRIES):
-		var found := registry.detect()
-		if found:
-			return found
-		if attempt < BACKEND_DETECT_RETRIES - 1:
-			logger.debug(
-				"Backend detection attempt %d/%d found nothing; retrying in %.1fs"
-				% [attempt + 1, BACKEND_DETECT_RETRIES, BACKEND_DETECT_RETRY_DELAY]
-			)
-			await get_tree().create_timer(BACKEND_DETECT_RETRY_DELAY).timeout
-	return null
 
 
 func _adopt_current_hardware_mode() -> void:

@@ -17,7 +17,6 @@ const ModeSelectOverlay = preload("res://plugins/fan-manager/core/ui/mode_select
 const GameCurveManager = preload("res://plugins/fan-manager/core/modes/game_curve_manager.gd")
 const AsusWmiFanBackend = preload("res://plugins/fan-manager/core/backends/asus_wmi_fan_backend.gd")
 const HwmonFanBackend = preload("res://plugins/fan-manager/core/backends/hwmon_fan_backend.gd")
-const FanBackend = preload("res://plugins/fan-manager/core/backends/fan_backend.gd")
 
 var registry: FanBackendRegistry
 var store: FanCurveStore
@@ -45,39 +44,22 @@ func _ready() -> void:
 	# tasks/16-quick-bar-em-vez-de-overlay.md.
 	add_to_quick_bar(mode_select_overlay, null)
 
-	# Backend detection retries in the background (see
-	# FanModeManager._ready()), so .backend may still be null here even
-	# though it'll be found a moment later. GameCurveManager needs
-	# mode_select_overlay.profiles_panel, which only resolves once the
-	# overlay's own _ready() has run (it just did, synchronously, via
-	# add_to_quick_bar() above).
-	mode_manager.backend_ready.connect(_on_backend_ready)
-	# If detection already resolved on its first attempt (the common
-	# case), backend_ready fired synchronously during add_child(mode_manager)
-	# above, before this connection existed. Catch up manually so
-	# GameCurveManager still gets built in that case.
+	# GameCurveManager needs mode_select_overlay.profiles_panel, which
+	# only resolves once the overlay's own _ready() has run (it just
+	# did, synchronously, via add_to_quick_bar() above): can't be built
+	# any earlier. Skipped entirely if no backend was detected, same
+	# guard the overlay itself uses.
 	if mode_manager.backend:
-		_on_backend_ready(mode_manager.backend)
-
-
-## Signal handler for FanModeManager.backend_ready. Builds
-## GameCurveManager once a backend is actually found; a no-op if
-## detection never found one (backend_ready still fires with null so
-## callers aren't left waiting forever).
-func _on_backend_ready(backend: FanBackend) -> void:
-	if not backend:
-		return
-
-	var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
-	game_curve_manager = GameCurveManager.new(
-		launch_manager,
-		store,
-		mode_manager,
-		mode_select_overlay.profiles_panel,
-		mode_manager.hardware_id
-	)
-	add_child(game_curve_manager)
-	mode_select_overlay.bind_game_curve_manager(game_curve_manager)
+		var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
+		game_curve_manager = GameCurveManager.new(
+			launch_manager,
+			store,
+			mode_manager,
+			mode_select_overlay.profiles_panel,
+			mode_manager.hardware_id
+		)
+		add_child(game_curve_manager)
+		mode_select_overlay.bind_game_curve_manager(game_curve_manager)
 
 
 func get_settings_menu() -> Control:
