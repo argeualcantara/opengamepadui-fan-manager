@@ -89,6 +89,7 @@ func _ready() -> void:
 
 	launch_manager.app_switched.connect(_on_app_switched)
 	launch_manager.all_apps_stopped.connect(_on_all_apps_stopped)
+	mode_manager.mode_changed.connect(_on_mode_changed)
 	mode_manager.mode_changed.connect(_on_state_changed)
 	profiles_panel.active_profile_changed.connect(_on_state_changed)
 
@@ -125,6 +126,44 @@ func _on_app_switched(_from, to) -> void:
 func _on_all_apps_stopped() -> void:
 	logger.debug("all_apps_stopped -> steam home")
 	_apply_or_track(null)
+
+
+## Signal handler for mode_manager.mode_changed: whenever the mode
+## actually becomes "custom" — however that happened, a manual toggle
+## in ModeSelectOverlay just as much as _apply_context() switching mode
+## for a saved context — reloads the active context's curve straight
+## from the store's document. Never trusts whatever curve happens to
+## still be sitting in the engine: CustomCurveEngine instances are one
+## per fan_id, shared by every context, so the engine's in-memory curve
+## can be leftover data from whichever context was active last. The
+## store's document is the source of truth for what THIS context's
+## curve actually is; store.load_data() returns the shared in-memory
+## copy rather than re-reading disk, so this always sees a fully
+## up-to-date, consistent state, even mid-flush (see FanCurveStore's
+## enqueue()/flush() doc comments for why that's race-safe).
+func _on_mode_changed(mode: String) -> void:
+	if mode != "custom" or not per_game_enabled or active_game_context.is_empty():
+		return
+
+	var data: Dictionary = store.load_data(hardware_id)
+	var game_curves: Dictionary = data.get("game_curves", {})
+	if not game_curves.has(active_game_context):
+		return
+
+	var curve: Dictionary = game_curves[active_game_context].get("curve", {})
+	if curve.is_empty():
+		return
+
+	var engines := mode_manager.get_all_curve_engines()
+	logger.debug(
+		"_on_mode_changed('%s'): reloading curve from store for context '%s': %s"
+		% [mode, active_game_context, curve]
+	)
+	for fan_id in curve:
+		if engines.has(fan_id):
+			engines[fan_id].load_curve(curve[fan_id])
+
+	curve_applied.emit()
 
 
 ## Signal handler for mode_changed/active_profile_changed: those are
@@ -182,13 +221,18 @@ func _apply_context(saved: Dictionary) -> void:
 	if mode.is_empty():
 		return
 
+	# If mode already equals current_mode, set_mode() below is a no-op
+	# and mode_changed never fires — so _on_mode_changed() (which is
+	# what normally reloads this context's curve on becoming "custom")
+	# never runs either. Track that here so this context's curve still
+	# gets applied explicitly in that case, right below.
+	var was_already_in_mode := mode == mode_manager.current_mode
+
 	# set_mode() only mutates the in-memory document and enqueues (via
 	# _on_state_changed(), if it actually changes mode) — it never
 	# flushes. That's what makes it safe to call here even though the
 	# curve below hasn't been loaded yet: nothing hits disk until this
-	# function's own flush() at the bottom, by which point the queued
-	# snapshot job (if any) reads the curve loaded below, not whatever
-	# was in the engine before this call.
+	# function's own flush() at the bottom.
 	if not mode_manager.set_mode(mode):
 		logger.warn(
 			"Saved mode '%s' for context '%s' is no longer valid; keeping current mode"
@@ -198,7 +242,12 @@ func _apply_context(saved: Dictionary) -> void:
 
 	logger.info("Applied per-game config for context '%s'" % active_game_context)
 
-	if mode == "custom":
+	# A real mode switch to "custom" already went through
+	# _on_mode_changed() above, via the mode_changed signal set_mode()
+	# just emitted — it reloads this exact same curve from the store.
+	# Only the no-op case (already in the right mode) needs it applied
+	# explicitly here.
+	if was_already_in_mode and mode == "custom":
 		var curve: Dictionary = saved.get("curve", {})
 		var engines := mode_manager.get_all_curve_engines()
 		logger.debug("_apply_context('%s'): loading raw per-fan curve %s" % [active_game_context, curve])
@@ -216,20 +265,31 @@ func _apply_context(saved: Dictionary) -> void:
 ## per-fan curves and stage them under context_key. No-op if there are
 ## no curve engines yet.
 func _snapshot(context_key: String) -> void:
-	var engines := mode_manager.get_all_curve_engines()
-	if engines.is_empty():
-		logger.debug("_snapshot('%s'): no curve engines yet, skipping" % context_key)
-		return
-
+	var mode := mode_manager.current_mode
 	var curve: Dictionary = {}
-	for fan_id in engines:
-		curve[fan_id] = engines[fan_id].get_curve()
+
+	if mode == "custom":
+		var engines := mode_manager.get_all_curve_engines()
+		if engines.is_empty():
+			logger.debug("_snapshot('%s'): no curve engines yet, skipping" % context_key)
+			return
+		for fan_id in engines:
+			curve[fan_id] = engines[fan_id].get_curve()
+	else:
+		# Not in custom mode: there's no live curve to read — engines
+		# are shared across every context (see _on_mode_changed()'s doc
+		# comment), so whatever they currently hold could easily be
+		# leftover data from a different context. Keep whatever this
+		# context already had saved instead of overwriting it with that
+		# stale/foreign curve.
+		var existing: Dictionary = store.load_data(hardware_id).get("game_curves", {}).get(context_key, {})
+		curve = existing.get("curve", {})
 
 	var active_profile = store.load_data(hardware_id).get("active_profile")
-	store.set_game_curve(context_key, mode_manager.current_mode, active_profile, curve)
+	store.set_game_curve(context_key, mode, active_profile, curve)
 	logger.debug(
 		"Staged per-game config for context '%s': mode='%s' active_profile=%s"
-		% [context_key, mode_manager.current_mode, active_profile]
+		% [context_key, mode, active_profile]
 	)
 
 

@@ -13,6 +13,12 @@ signal value_changed(temperature: int, percent: float)
 
 const STEP := 1.0
 
+## Holding ui_left/ui_right keeps stepping: HOLD_INITIAL_DELAY is the
+## pause after the first (already-applied) step before auto-repeat
+## kicks in, HOLD_REPEAT_INTERVAL is the pace once it does.
+const HOLD_INITIAL_DELAY := 0.4
+const HOLD_REPEAT_INTERVAL := 0.06
+
 @export var temperature: int = 0:
 	set(v):
 		temperature = v
@@ -31,6 +37,11 @@ var percent: float = 0.0
 
 var _tween: Tween
 
+## -1 while ui_left is held, 1 while ui_right is held, 0 otherwise.
+## _process() only runs while this is non-zero (see _start_hold()).
+var _held_direction := 0
+var _hold_timer := 0.0
+
 
 ## Syncs the label/fill to the current temperature/percent and wires
 ## focus/hover/theme signals.
@@ -38,9 +49,14 @@ func _ready() -> void:
 	focus_mode = Control.FOCUS_ALL
 	temp_label.text = "%d°C" % temperature
 	_update_visual()
+	set_process(false)
 
 	focus_entered.connect(_on_focus)
 	focus_exited.connect(_on_unfocus)
+	# Separate from _on_unfocus(), which also runs on mouse_exited (the
+	# pointer merely leaving the row, unrelated to gamepad focus) —
+	# auto-repeat must only stop when input focus itself is actually lost.
+	focus_exited.connect(_stop_hold)
 	mouse_entered.connect(_on_focus)
 	mouse_exited.connect(_on_unfocus)
 	theme_changed.connect(_on_theme_changed)
@@ -72,13 +88,19 @@ func _update_visual() -> void:
 	thumb.anchor_right = fraction
 
 
-## ui_left/ui_right step the value by STEP; left-click grabs focus.
+## ui_left/ui_right step the value by STEP and start auto-repeating
+## while held (see _start_hold()); left-click grabs focus.
 func _gui_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_left"):
 		_step(-STEP)
+		_start_hold(-1)
 		accept_event()
 	elif event.is_action_pressed("ui_right"):
 		_step(STEP)
+		_start_hold(1)
+		accept_event()
+	elif event.is_action_released("ui_left") or event.is_action_released("ui_right"):
+		_stop_hold()
 		accept_event()
 	elif event is InputEventMouseButton and event.is_pressed():
 		if (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
@@ -91,6 +113,32 @@ func _step(delta: float) -> void:
 	percent = clampf(percent + delta, 0.0, 100.0)
 	_update_visual()
 	value_changed.emit(temperature, percent)
+
+
+## Arms auto-repeat for direction (-1/1): the initial press above
+## already applied one step, so this only starts ticking once
+## HOLD_INITIAL_DELAY has passed, to avoid a plain tap double-stepping.
+func _start_hold(direction: int) -> void:
+	_held_direction = direction
+	_hold_timer = HOLD_INITIAL_DELAY
+	set_process(true)
+
+
+## Stops auto-repeat: called on release, on losing focus, or once
+## _process() finds nothing held anymore.
+func _stop_hold() -> void:
+	_held_direction = 0
+	set_process(false)
+
+
+func _process(delta: float) -> void:
+	if _held_direction == 0:
+		set_process(false)
+		return
+	_hold_timer -= delta
+	if _hold_timer <= 0.0:
+		_step(_held_direction * STEP)
+		_hold_timer = HOLD_REPEAT_INTERVAL
 
 
 ## Signal handler for focus_entered/mouse_entered: fades the highlight in.

@@ -264,6 +264,40 @@ func test_applying_saved_context_with_a_mode_change_does_not_corrupt_the_saved_c
 	assert_eq(saved_curve, {10: 5.0, 20: 10.0}, "the saved curve on disk must survive applying it")
 
 
+func test_bios_context_still_seeds_engines_so_a_later_manual_custom_switch_keeps_its_own_curve() -> void:
+	# Regression: Steam Home is custom with curve A, "Hades" is bios but
+	# has its own saved curve B from an earlier session. Applying the
+	# bios context used to skip loading B into the (shared, per-fan)
+	# engines, leaving them holding Steam's A; a later manual switch to
+	# custom inside Hades would then reuse that leaked A instead of B.
+	var data := store.load_data(_test_hardware_id)
+	data["game_curves"] = {
+		GameCurveManager.STEAM_HOME_KEY: {
+			"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 1, 20: 2}}
+		},
+		"hades": {
+			"mode": "bios", "active_profile": null, "curve": {_fan_id: {10: 9, 20: 8}}
+		},
+	}
+	store.save(_test_hardware_id, data)
+
+	manager.per_game_enabled = true
+
+	# Steam Home applies first (nothing running yet), loading curve A
+	# into the shared fan-0 engine.
+	assert_eq(_engine().get_curve(), {10: 1.0, 20: 2.0})
+
+	# Entering Hades applies its saved "bios" context.
+	launch_manager.switch_to(FakeRunningApp.new("Hades"))
+	assert_eq(mode_manager.current_mode, "bios")
+
+	# The user now manually switches Hades to custom mode by hand (not
+	# via a saved-context apply): must reuse Hades' own curve B, not
+	# whatever Steam Home last loaded into the shared engine.
+	mode_manager.set_mode("custom")
+	assert_eq(_engine().get_curve(), {10: 9.0, 20: 8.0})
+
+
 func test_applying_saved_context_selects_named_profile() -> void:
 	store.save_profile(_test_hardware_id, "Silencioso", {_fan_id: {10: 1, 20: 2}})
 	var data := store.load_data(_test_hardware_id)
