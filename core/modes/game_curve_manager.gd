@@ -37,6 +37,19 @@ var logger := Log.get_logger("FanManager GameCurveManager")
 ## (duck-typed), so tests can pass a lightweight double instead of
 ## OGUI's real LaunchManager.
 var launch_manager
+## Untyped on purpose, same reasoning as launch_manager. OGUI's real
+## in_game_state (res://assets/state/states/in_game.tres) is a State
+## resource emitting state_exited when the last running app actually
+## stops (LaunchManager._on_app_state_changed() removes this state
+## once _running is empty) — this is the only reliable way to detect
+## "returned to Steam home", since LaunchManager.app_switched is NOT
+## emitted for that transition: on_focused_app_changed() in
+## launch_manager.gd returns early (before emitting app_switched)
+## whenever focus moves to the OGUI overlay itself (app id in
+## [gamescope.OVERLAY_GAME_ID, 0, 1]), which is exactly what happens
+## when a game's card disappears from the overlay and focus returns
+## to Steam.
+var in_game_state
 var store: FanCurveStore
 var mode_manager: FanModeManager
 var profiles_panel: ProfileManagerPanel
@@ -54,17 +67,20 @@ var per_game_enabled: bool = false:
 			_apply_or_track(launch_manager.get_current_app())
 
 
-## Wires dependencies in: launch_manager (game switch events), store
-## (persistence), mode_manager (mode/curve state), profiles_panel
-## (profile apply), hardware_id (persistence key).
+## Wires dependencies in: launch_manager (game switch events),
+## in_game_state (detects returning to Steam home, see its doc
+## comment), store (persistence), mode_manager (mode/curve state),
+## profiles_panel (profile apply), hardware_id (persistence key).
 func _init(
 	p_launch_manager,
+	p_in_game_state,
 	p_store: FanCurveStore,
 	p_mode_manager: FanModeManager,
 	p_profiles_panel: ProfileManagerPanel,
 	p_hardware_id: String
 ) -> void:
 	launch_manager = p_launch_manager
+	in_game_state = p_in_game_state
 	store = p_store
 	mode_manager = p_mode_manager
 	profiles_panel = p_profiles_panel
@@ -80,6 +96,7 @@ func _ready() -> void:
 	active_game_context = raw_context if raw_context != null else ""
 
 	launch_manager.app_switched.connect(_on_app_switched)
+	in_game_state.state_exited.connect(_on_in_game_state_exited)
 	mode_manager.mode_changed.connect(_on_mode_changed)
 	profiles_panel.active_profile_changed.connect(_on_state_changed)
 	_sync_curve_engine_connections()
@@ -98,6 +115,17 @@ func _ready() -> void:
 func _on_app_switched(_from, to) -> void:
 	logger.debug("app_switched -> %s" % (to.launch_item.name if to != null and to.launch_item else "(steam home)"))
 	_apply_or_track(to)
+
+
+## Signal handler for in_game_state.state_exited: fires when the last
+## running app actually stops and its card disappears from the
+## overlay (see in_game_state's doc comment for why app_switched alone
+## can't be relied on for this transition). Treated the same as
+## _on_app_switched(_from, null) -> tracks/applies the Steam home
+## context.
+func _on_in_game_state_exited(_to) -> void:
+	logger.debug("in_game_state exited -> steam home")
+	_apply_or_track(null)
 
 
 func _on_mode_changed(_mode: String) -> void:

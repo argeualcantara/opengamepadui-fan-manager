@@ -31,6 +31,15 @@ class FakeLaunchManager extends RefCounted:
 		app_switched.emit(previous, app)
 
 
+## Lightweight double for OGUI's in_game_state (a State resource):
+## only exposes what GameCurveManager actually uses (state_exited).
+class FakeInGameState extends RefCounted:
+	signal state_exited(to)
+
+	func exit(to = null) -> void:
+		state_exited.emit(to)
+
+
 class StubBackend extends FanBackend:
 	var supported := true
 	var hardware_id_value := "gut-gamecurve-test"
@@ -64,6 +73,7 @@ var registry: FanBackendRegistry
 var mode_manager: FanModeManager
 var profiles_panel: ProfileManagerPanel
 var launch_manager: FakeLaunchManager
+var in_game_state: FakeInGameState
 var manager: GameCurveManager
 
 var _test_hardware_id := "gut-gamecurve-test"
@@ -96,8 +106,9 @@ func before_each() -> void:
 	)
 
 	launch_manager = FakeLaunchManager.new()
+	in_game_state = FakeInGameState.new()
 
-	manager = GameCurveManager.new(launch_manager, store, mode_manager, profiles_panel, _test_hardware_id)
+	manager = GameCurveManager.new(launch_manager, in_game_state, store, mode_manager, profiles_panel, _test_hardware_id)
 	add_child_autoqfree(manager)
 	await wait_frames(1, "let GameCurveManager._ready() run")
 
@@ -129,6 +140,34 @@ func test_null_app_maps_to_steam_home_context() -> void:
 	launch_manager.switch_to(null)
 
 	assert_eq(manager.active_game_context, GameCurveManager.STEAM_HOME_KEY)
+
+
+func test_in_game_state_exit_maps_to_steam_home_context() -> void:
+	launch_manager.switch_to(FakeRunningApp.new("Hades"))
+
+	in_game_state.exit()
+
+	assert_eq(manager.active_game_context, GameCurveManager.STEAM_HOME_KEY)
+
+
+func test_in_game_state_exit_restores_steam_home_config() -> void:
+	var data := store.load(_test_hardware_id)
+	data["game_curves"] = {
+		GameCurveManager.STEAM_HOME_KEY: {
+			"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 1, 20: 2}}
+		}
+	}
+	store.save(_test_hardware_id, data)
+
+	manager.per_game_enabled = true
+	launch_manager.switch_to(FakeRunningApp.new("Hades"))
+	mode_manager.set_mode("custom")
+	_engine().set_point(30, 77.0)
+
+	in_game_state.exit()
+
+	assert_eq(mode_manager.current_mode, "custom")
+	assert_eq(_engine().get_curve(), {10: 1.0, 20: 2.0})
 
 
 func test_switching_context_without_saved_config_leaves_state_untouched() -> void:
