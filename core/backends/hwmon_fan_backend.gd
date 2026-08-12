@@ -8,14 +8,9 @@ class_name HwmonFanBackend
 ## CPU+GPU handhelds) split into "<device path>#<channel>" fan_ids —
 ## see _resolve_fan_channels().
 ##
-## Referenced via preload()'d consts, not bare class_name lookups:
-## OGUI loads plugins from a zip, so the global class_name cache is
-## never populated.
-const PwmIo = preload("res://plugins/fan-manager/core/backends/pwm_io.gd")
+
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
-
 const HWMON_DIR := "/sys/class/hwmon"
-
 ## Upper bound on channels to scan for.
 const MAX_FAN_CHANNELS := 4
 

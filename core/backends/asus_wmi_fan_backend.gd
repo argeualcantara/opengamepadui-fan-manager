@@ -6,16 +6,10 @@ class_name AsusWmiFanBackend
 ## table once (no polling needed). fan_id format: "<hwmon device
 ## path>#<channel>".
 
-## Referenced via preload()'d consts, not bare class_name lookups:
-## OGUI loads plugins from a zip, so the global class_name cache is
-## never populated.
-const PwmIo = preload("res://plugins/fan-manager/core/backends/pwm_io.gd")
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
-
 const HWMON_DIR := "/sys/class/hwmon"
 const HWMON_NAME := "asus_custom_fan_curve"
 const MAX_HARDWARE_POINTS := 8
-
 ## Upper bound on channels to scan for (CPU/GPU/MID fan).
 const MAX_FAN_CHANNELS := 3
 
