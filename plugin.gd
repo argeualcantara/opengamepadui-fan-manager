@@ -39,8 +39,6 @@ const QUICK_BAR_WAIT_DELAY := 0.1
 
 
 func _ready() -> void:
-	logger.info("_ready(): starting fan-manager plugin init")
-
 	registry = FanBackendRegistry.new()
 	# Register more specific/vendor backends before the generic hwmon
 	# fallback (FanBackendRegistry tries them in registration order).
@@ -50,7 +48,6 @@ func _ready() -> void:
 	store = FanCurveStore.new()
 	mode_manager = FanModeManager.new(registry, store)
 	add_child(mode_manager)
-	logger.info("_ready(): FanModeManager ready, backend=%s" % (mode_manager.backend.get_script().get_global_name() if mode_manager.backend else "null"))
 
 	mode_select_overlay = load(plugin_base + "/core/ui/mode_select_overlay.tscn").instantiate()
 	mode_select_overlay.mode_manager = mode_manager
@@ -60,12 +57,7 @@ func _ready() -> void:
 	# Settings"/"Performance"): NOT add_overlay()/OverlayContainer,
 	# which --overlay-mode's scene doesn't even instantiate. See
 	# tasks/16-quick-bar-em-vez-de-overlay.md.
-	logger.info("_ready(): calling add_to_quick_bar()")
 	add_to_quick_bar(mode_select_overlay, null)
-	logger.info(
-		"_ready(): add_to_quick_bar() returned, overlay in tree=%s"
-		% mode_select_overlay.is_inside_tree()
-	)
 
 	# GameCurveManager needs mode_select_overlay.profiles_panel, which
 	# only resolves once the overlay's own _ready() has run (it just
@@ -84,16 +76,12 @@ func _ready() -> void:
 		add_child(game_curve_manager)
 		mode_select_overlay.bind_game_curve_manager(game_curve_manager)
 
-	logger.info("_ready(): fan-manager plugin init complete")
-
 
 ## Polls until a node in the "quick-bar" group exists (or retries run
 ## out, logged and left for add_to_quick_bar() to fail its own way).
 func _wait_for_quick_bar_menu() -> void:
-	logger.info("_wait_for_quick_bar_menu(): waiting for a 'quick-bar' group member")
 	for attempt in range(QUICK_BAR_WAIT_RETRIES):
 		if get_tree().get_first_node_in_group("quick-bar"):
-			logger.info("_wait_for_quick_bar_menu(): found after %d attempt(s)" % (attempt + 1))
 			return
 		if attempt < QUICK_BAR_WAIT_RETRIES - 1:
 			await get_tree().create_timer(QUICK_BAR_WAIT_DELAY).timeout
