@@ -53,6 +53,7 @@ func _ready() -> void:
 		return
 
 	var data: Dictionary = store.load_data(hardware_id)
+	logger.debug("_ready(): full saved config on plugin load: %s" % JSON.stringify(data, "\t"))
 	var saved_mode: String = data.get("active_mode", "bios")
 	logger.debug("Reapplying saved mode '%s' on startup" % saved_mode)
 
