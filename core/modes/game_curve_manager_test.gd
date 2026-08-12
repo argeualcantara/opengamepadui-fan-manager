@@ -15,10 +15,12 @@ class FakeRunningApp extends RefCounted:
 
 
 ## Lightweight double for OGUI's LaunchManager: only exposes what
-## GameCurveManager actually uses (app_switched, get_current_app()), so
-## tests don't depend on instantiating the real Resource singleton.
+## GameCurveManager actually uses (app_switched, all_apps_stopped,
+## get_current_app()), so tests don't depend on instantiating the real
+## Resource singleton.
 class FakeLaunchManager extends RefCounted:
 	signal app_switched(from, to)
+	signal all_apps_stopped()
 
 	var _current = null
 
@@ -29,6 +31,10 @@ class FakeLaunchManager extends RefCounted:
 		var previous = _current
 		_current = app
 		app_switched.emit(previous, app)
+
+	func stop_all() -> void:
+		_current = null
+		all_apps_stopped.emit()
 
 
 class StubBackend extends FanBackend:
@@ -129,6 +135,34 @@ func test_null_app_maps_to_steam_home_context() -> void:
 	launch_manager.switch_to(null)
 
 	assert_eq(manager.active_game_context, GameCurveManager.STEAM_HOME_KEY)
+
+
+func test_all_apps_stopped_maps_to_steam_home_context() -> void:
+	launch_manager.switch_to(FakeRunningApp.new("Hades"))
+
+	launch_manager.stop_all()
+
+	assert_eq(manager.active_game_context, GameCurveManager.STEAM_HOME_KEY)
+
+
+func test_all_apps_stopped_restores_steam_home_config() -> void:
+	var data := store.load(_test_hardware_id)
+	data["game_curves"] = {
+		GameCurveManager.STEAM_HOME_KEY: {
+			"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 1, 20: 2}}
+		}
+	}
+	store.save(_test_hardware_id, data)
+
+	manager.per_game_enabled = true
+	launch_manager.switch_to(FakeRunningApp.new("Hades"))
+	mode_manager.set_mode("custom")
+	_engine().set_point(30, 77.0)
+
+	launch_manager.stop_all()
+
+	assert_eq(mode_manager.current_mode, "custom")
+	assert_eq(_engine().get_curve(), {10: 1.0, 20: 2.0})
 
 
 func test_switching_context_without_saved_config_leaves_state_untouched() -> void:

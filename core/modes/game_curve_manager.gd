@@ -19,6 +19,18 @@ const ProfileManagerPanel = preload("res://plugins/fan-manager/core/ui/component
 
 const STEAM_HOME_KEY := "__steam_home__"
 
+## Fired after _apply_context() loads a per-context curve directly into
+## the curve engines. CustomCurveEngine.load_curve() deliberately does
+## not emit curve_changed (see its doc comment), so nothing else tells
+## a visible CustomCurveEditor to redraw with the new values — the UI
+## only otherwise resyncs on FanModeManager.mode_changed, which no
+## longer fires for a same-mode context switch (see the no-op guard in
+## FanModeManager.set_mode()). Listeners should re-pull the curve from
+## the engine (e.g. ModeSelectOverlay re-calling CustomCurveEditor.
+## bind_engine()) to bring the displayed sliders back in sync with the
+## hardware/engine state.
+signal curve_applied()
+
 var logger := Log.get_logger("FanManager GameCurveManager")
 
 ## Untyped on purpose: only used via .app_switched/.get_current_app()
@@ -42,9 +54,11 @@ var per_game_enabled: bool = false:
 			_apply_or_track(launch_manager.get_current_app())
 
 
-## Wires dependencies in: launch_manager (game switch events), store
-## (persistence), mode_manager (mode/curve state), profiles_panel
-## (profile apply), hardware_id (persistence key).
+## Wires dependencies in: launch_manager (game switch events, and
+## all_apps_stopped for detecting a return to Steam home — see
+## _on_all_apps_stopped()'s doc comment), store (persistence),
+## mode_manager (mode/curve state), profiles_panel (profile apply),
+## hardware_id (persistence key).
 func _init(
 	p_launch_manager,
 	p_store: FanCurveStore,
@@ -68,6 +82,7 @@ func _ready() -> void:
 	active_game_context = raw_context if raw_context != null else ""
 
 	launch_manager.app_switched.connect(_on_app_switched)
+	launch_manager.all_apps_stopped.connect(_on_all_apps_stopped)
 	mode_manager.mode_changed.connect(_on_mode_changed)
 	profiles_panel.active_profile_changed.connect(_on_state_changed)
 	_sync_curve_engine_connections()
@@ -86,6 +101,25 @@ func _ready() -> void:
 func _on_app_switched(_from, to) -> void:
 	logger.debug("app_switched -> %s" % (to.launch_item.name if to != null and to.launch_item else "(steam home)"))
 	_apply_or_track(to)
+
+
+## Signal handler for launch_manager.all_apps_stopped: fires exactly
+## once, when the last running app actually terminates (its card
+## disappears from the overlay). Needed because app_switched is NOT
+## emitted for this transition: on_focused_app_changed() in
+## launch_manager.gd returns early (before emitting app_switched)
+## whenever focus moves to the OGUI overlay itself.
+##
+## Deliberately NOT using in_game_state.state_exited for this (tried
+## first): that signal fires any time a new state is pushed on top of
+## in_game_state in OGUI's state stack — e.g. opening the Quick Bar
+## menu while the game is still running also pushes a state and fires
+## state_exited on in_game_state, which wrongly reverted to the Steam
+## home curve mid-game every time a menu was opened. all_apps_stopped
+## only fires when LaunchManager actually has zero running apps left.
+func _on_all_apps_stopped() -> void:
+	logger.debug("all_apps_stopped -> steam home")
+	_apply_or_track(null)
 
 
 func _on_mode_changed(_mode: String) -> void:
@@ -138,6 +172,8 @@ func _apply_or_track(to) -> void:
 		return
 
 	var data: Dictionary = store.load_data(hardware_id)
+	logger.debug("_apply_or_track('%s'): full saved config: %s" % [context_key, JSON.stringify(data, "\t")])
+
 	var game_curves: Dictionary = data.get("game_curves", {})
 	if game_curves.has(context_key):
 		logger.debug("_apply_or_track('%s'): found saved config, applying" % context_key)
@@ -147,8 +183,13 @@ func _apply_or_track(to) -> void:
 
 
 ## Applies a saved context config ({mode, active_profile, curve}):
-## switches mode, then either applies the named profile (if still
-## valid) or loads the raw per-fan curve directly into each engine.
+## switches mode, then loads the raw per-fan curve directly into each
+## engine. Deliberately does NOT apply by active_profile's name: with
+## the profile picker UI hidden, every context shares the same single
+## "Default" profile record, so applying by name would load whichever
+## context last overwrote it instead of this context's own curve.
+## saved["curve"] is captured live per-context (see _snapshot_and_save())
+## and is the only thing that actually isolates one context from another.
 func _apply_context(saved: Dictionary) -> void:
 	var mode: String = saved.get("mode", "")
 	logger.debug("_apply_context('%s'): %s" % [active_game_context, saved])
@@ -167,23 +208,14 @@ func _apply_context(saved: Dictionary) -> void:
 	if mode != "custom":
 		return
 
-	var profile_name = saved.get("active_profile")
-	var data: Dictionary = store.load_data(hardware_id)
-	var profiles: Dictionary = data.get("profiles")
-	if profiles == null:
-		profiles = {}
-
-	if profile_name != null and profiles.has(profile_name):
-		logger.debug("_apply_context('%s'): applying saved profile '%s'" % [active_game_context, profile_name])
-		profiles_panel.apply_profile(profile_name)
-		return
-
 	var curve: Dictionary = saved.get("curve", {})
 	var engines := mode_manager.get_all_curve_engines()
 	logger.debug("_apply_context('%s'): loading raw per-fan curve %s" % [active_game_context, curve])
 	for fan_id in curve:
 		if engines.has(fan_id):
 			engines[fan_id].load_curve(curve[fan_id])
+
+	curve_applied.emit()
 
 
 ## Captures the current mode/active_profile/per-fan curves and saves

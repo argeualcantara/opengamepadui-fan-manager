@@ -77,7 +77,7 @@ layout_mode = 2
 [node name="PerGameToggle" parent="PerGameToggleSlot" instance=ExtResource("8")]
 unique_name_in_owner = true
 layout_mode = 2
-text = "Enable per game config"
+text = "Per game config"
 focus_neighbor_top = NodePath("../../ModeDropdownSlot/ModeDropdown")
 focus_neighbor_bottom = NodePath("../../ApplyButtonSlot/ApplyButton")
 
