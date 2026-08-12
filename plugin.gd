@@ -7,7 +7,7 @@ extends Plugin
 ## from a zip at runtime (ProjectSettings.load_resource_pack()), which
 ## never populates Godot's global class_name cache, so bare names fail
 ## to resolve outside the file that declares them. QuickBarCard,
-## LaunchManager, State, and Plugin below are OGUI's own core classes,
+## LaunchManager, and Plugin below are OGUI's own core classes,
 ## compiled into the base game normally, so they resolve fine as bare
 ## names. See tasks/17-fix-class-name-resolution-em-plugin-empacotado.md.
 const FanBackendRegistry = preload("res://plugins/fan-manager/core/backends/fan_backend_registry.gd")
@@ -51,10 +51,8 @@ func _ready() -> void:
 	# guard the overlay itself uses.
 	if mode_manager.backend:
 		var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
-		var in_game_state := load("res://assets/state/states/in_game.tres") as State
 		game_curve_manager = GameCurveManager.new(
 			launch_manager,
-			in_game_state,
 			store,
 			mode_manager,
 			mode_select_overlay.profiles_panel,
