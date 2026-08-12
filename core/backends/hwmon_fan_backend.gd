@@ -11,7 +11,6 @@ class_name HwmonFanBackend
 ## Referenced via preload()'d consts, not bare class_name lookups:
 ## OGUI loads plugins from a zip, so the global class_name cache is
 ## never populated.
-const HardwareId = preload("res://plugins/fan-manager/core/backends/hardware_id.gd")
 const PwmIo = preload("res://plugins/fan-manager/core/backends/pwm_io.gd")
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
 
@@ -29,25 +28,6 @@ var _last_written_pwm: Dictionary = {}
 
 func _init() -> void:
 	logger = Log.get_logger("FanManager HwmonFanBackend")
-
-
-func is_supported() -> bool:
-	var supported := not _get_or_discover_fans().is_empty()
-	logger.debug("is_supported() -> %s" % supported)
-	return supported
-
-
-func get_hardware_id() -> String:
-	var hardware_id := HardwareId.from_dmi()
-	if hardware_id == HardwareId.UNKNOWN:
-		logger.warn("Unable to read DMI product/board name, using generic hardware id")
-	return hardware_id
-
-
-func list_fans() -> Array[String]:
-	var fans := _get_or_discover_fans()
-	logger.debug("list_fans() -> %s" % [fans])
-	return fans
 
 
 func get_bios_curve(_fan_id: String) -> Dictionary:
@@ -275,12 +255,3 @@ func _pwm_to_percent(pwm_value: int) -> float:
 
 func _read_text(path: String) -> String:
 	return PwmIo.read_text(path)
-
-
-func _write_text(path: String, text: String) -> bool:
-	var wrote := PwmIo.write_text(path, text)
-	if wrote and not PwmIo.dry_run:
-		logger.debug("Wrote '%s' to %s" % [text, path])
-	elif not wrote:
-		logger.error("Unable to write to %s (permission denied or missing udev rule?)" % path)
-	return wrote

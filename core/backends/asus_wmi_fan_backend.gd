@@ -9,7 +9,6 @@ class_name AsusWmiFanBackend
 ## Referenced via preload()'d consts, not bare class_name lookups:
 ## OGUI loads plugins from a zip, so the global class_name cache is
 ## never populated.
-const HardwareId = preload("res://plugins/fan-manager/core/backends/hardware_id.gd")
 const PwmIo = preload("res://plugins/fan-manager/core/backends/pwm_io.gd")
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
 
@@ -31,25 +30,6 @@ var _discovered_fans: Array[String] = []
 
 func _init() -> void:
 	logger = Log.get_logger("FanManager AsusWmiFanBackend")
-
-
-func is_supported() -> bool:
-	var supported := not _get_or_discover_fans().is_empty()
-	logger.debug("is_supported() -> %s" % supported)
-	return supported
-
-
-func get_hardware_id() -> String:
-	var hardware_id := HardwareId.from_dmi()
-	if hardware_id == HardwareId.UNKNOWN:
-		logger.warn("Unable to read DMI product/board name, using generic hardware id")
-	return hardware_id
-
-
-func list_fans() -> Array[String]:
-	var fans := _get_or_discover_fans()
-	logger.debug("list_fans() -> %s" % [fans])
-	return fans
 
 
 ## Returns fan<channel>_label (e.g. "cpu"/"gpu") for fan_id, falling
@@ -347,12 +327,3 @@ func _reduce_to_hardware_points(curve: Dictionary) -> Dictionary:
 	for point in kept:
 		reduced[point] = curve[point]
 	return reduced
-
-
-func _write_text(path: String, text: String) -> bool:
-	var wrote := PwmIo.write_text(path, text)
-	if wrote and not PwmIo.dry_run:
-		logger.debug("Wrote '%s' to %s" % [text, path])
-	elif not wrote:
-		logger.error("Unable to write to %s (permission denied or missing udev rule?)" % path)
-	return wrote
