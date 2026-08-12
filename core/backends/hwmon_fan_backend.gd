@@ -46,7 +46,7 @@ func get_hardware_id() -> String:
 
 func list_fans() -> Array[String]:
 	var fans := _get_or_discover_fans()
-	logger.debug("list_fans() -> %s" % fans)
+	logger.debug("list_fans() -> %s" % [fans])
 	return fans
 
 
