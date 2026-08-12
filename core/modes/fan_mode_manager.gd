@@ -50,6 +50,7 @@ func _ready() -> void:
 		# First run for this hardware: adopt whatever mode it's already
 		# in instead of writing an assumed default.
 		_adopt_current_hardware_mode()
+		store.flush()
 		return
 
 	var data: Dictionary = store.load_data(hardware_id)
@@ -61,6 +62,7 @@ func _ready() -> void:
 			"Failed to reapply saved mode '%s' on startup, falling back to bios" % saved_mode
 		)
 		set_mode("bios")
+	store.flush()
 
 
 func _adopt_current_hardware_mode() -> void:
@@ -231,15 +233,18 @@ func _adopt_current_custom_curve() -> void:
 		engine.start(backend, fan_id, curve)
 
 
+## In-memory only — no disk write here. Callers (_ready(),
+## _apply_context() via GameCurveManager, ModeSelectOverlay) are
+## responsible for calling store.flush() once their own top-level
+## operation is fully done.
 func _persist_active_mode(mode: String) -> void:
 	logger.debug("Persisting active_mode='%s' for hardware '%s'" % [mode, hardware_id])
-	var data: Dictionary = store.load_data(hardware_id)
-	data["active_mode"] = mode
-	store.save(hardware_id, data)
+	store.load_data(hardware_id)
+	store.set_active_mode(mode)
 
 
+## In-memory only — see _persist_active_mode()'s doc comment.
 func _persist_active_profile(profile_name: String) -> void:
 	logger.debug("Persisting active_profile='%s' for hardware '%s'" % [profile_name, hardware_id])
-	var data: Dictionary = store.load_data(hardware_id)
-	data["active_profile"] = profile_name
-	store.save(hardware_id, data)
+	store.load_data(hardware_id)
+	store.set_active_profile(profile_name)

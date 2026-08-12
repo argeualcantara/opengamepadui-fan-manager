@@ -117,7 +117,7 @@ func test_set_mode_switches_and_persists() -> void:
 	assert_true(manager.set_mode("custom"))
 	assert_eq(manager.current_mode, "custom")
 
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	assert_eq(data["active_mode"], "custom")
 
 

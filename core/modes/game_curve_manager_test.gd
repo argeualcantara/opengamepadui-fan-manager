@@ -126,7 +126,7 @@ func test_context_tracking_updates_regardless_of_toggle() -> void:
 	launch_manager.switch_to(FakeRunningApp.new("Cyberpunk 2077"))
 
 	assert_eq(manager.active_game_context, "cyberpunk 2077")
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	assert_eq(data["active_game_context"], "cyberpunk 2077")
 
 
@@ -146,7 +146,7 @@ func test_all_apps_stopped_maps_to_steam_home_context() -> void:
 
 
 func test_all_apps_stopped_restores_steam_home_config() -> void:
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	data["game_curves"] = {
 		GameCurveManager.STEAM_HOME_KEY: {
 			"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 1, 20: 2}}
@@ -178,7 +178,7 @@ func test_state_change_with_toggle_off_does_not_save_a_config() -> void:
 	launch_manager.switch_to(FakeRunningApp.new("Hades"))
 	mode_manager.set_mode("custom")
 
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	assert_false(data.get("game_curves", {}).has("hades"))
 
 
@@ -187,26 +187,45 @@ func test_mode_change_with_toggle_on_saves_full_state_for_active_context() -> vo
 	launch_manager.switch_to(FakeRunningApp.new("Hades"))
 
 	mode_manager.set_mode("custom")
+	# set_mode() only enqueues a snapshot job (see GameCurveManager.
+	# _on_state_changed()); production always pairs it with an explicit
+	# flush() from whoever's driving the switch (ModeSelectOverlay here).
+	store.flush()
 
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	assert_true(data["game_curves"].has("hades"))
 	assert_eq(data["game_curves"]["hades"]["mode"], "custom")
 
 
-func test_curve_edit_with_toggle_on_saves_config_for_active_context() -> void:
+func test_curve_edit_alone_does_not_save_a_config() -> void:
+	# Dragging a slider must never write anything by itself — only
+	# pressing Apply (profiles_panel.apply_current(), which commits the
+	# draft to hardware and emits active_profile_changed) does.
 	manager.per_game_enabled = true
 	launch_manager.switch_to(FakeRunningApp.new("Hades"))
 	mode_manager.set_mode("custom")
 
 	_engine().set_point(30, 77.0)
 
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
+	assert_false(data.get("game_curves", {}).has("hades"))
+
+
+func test_pressing_apply_saves_the_current_curve_for_active_context() -> void:
+	manager.per_game_enabled = true
+	launch_manager.switch_to(FakeRunningApp.new("Hades"))
+	mode_manager.set_mode("custom")
+
+	_engine().set_point(30, 77.0)
+	profiles_panel.apply_current()
+
+	var data := store.load_data(_test_hardware_id)
 	var saved_curve: Dictionary = FanCurveUtils.normalize_keys(data["game_curves"]["hades"]["curve"][_fan_id])
 	assert_eq(saved_curve[30], 77.0)
 
 
 func test_applying_saved_context_restores_mode_and_curve() -> void:
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	data["game_curves"] = {
 		"hades": {"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 5, 20: 10}}}
 	}
@@ -219,9 +238,35 @@ func test_applying_saved_context_restores_mode_and_curve() -> void:
 	assert_eq(_engine().get_curve(), {10: 5.0, 20: 10.0})
 
 
+func test_applying_saved_context_with_a_mode_change_does_not_corrupt_the_saved_curve() -> void:
+	# Regression test: current mode starts as "bios" (fresh store), so
+	# applying this saved "custom" context makes set_mode() actually
+	# switch mode (not the same-mode no-op) and emit mode_changed
+	# mid-_apply_context() — before the saved curve below is loaded.
+	# Without the _applying_context guard, that mode_changed used to
+	# trigger a premature snapshot that overwrote game_curves["hades"]
+	# on disk with whatever _start_custom_mode() had just seeded,
+	# before the real saved curve got a chance to load.
+	var data := store.load_data(_test_hardware_id)
+	data["game_curves"] = {
+		"hades": {"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 5, 20: 10}}}
+	}
+	store.save(_test_hardware_id, data)
+	assert_eq(mode_manager.current_mode, "bios", "sanity check: switching to this context must involve a real mode change")
+
+	manager.per_game_enabled = true
+	launch_manager.switch_to(FakeRunningApp.new("Hades"))
+
+	var reloaded := store.load_data(_test_hardware_id)
+	var saved_curve: Dictionary = FanCurveUtils.normalize_keys(
+		reloaded["game_curves"]["hades"]["curve"][_fan_id]
+	)
+	assert_eq(saved_curve, {10: 5.0, 20: 10.0}, "the saved curve on disk must survive applying it")
+
+
 func test_applying_saved_context_selects_named_profile() -> void:
 	store.save_profile(_test_hardware_id, "Silencioso", {_fan_id: {10: 1, 20: 2}})
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	data["game_curves"] = {"hades": {"mode": "custom", "active_profile": "Silencioso", "curve": {}}}
 	store.save(_test_hardware_id, data)
 
@@ -233,7 +278,7 @@ func test_applying_saved_context_selects_named_profile() -> void:
 
 
 func test_applying_saved_invalid_mode_falls_back_gracefully() -> void:
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	data["game_curves"] = {"hades": {"mode": "turbo", "active_profile": null, "curve": {}}}
 	store.save(_test_hardware_id, data)
 
@@ -246,7 +291,7 @@ func test_applying_saved_invalid_mode_falls_back_gracefully() -> void:
 
 func test_enabling_toggle_with_game_already_running_applies_immediately() -> void:
 	launch_manager.switch_to(FakeRunningApp.new("Hades"))
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	data["game_curves"] = {"hades": {"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 9}}}}
 	store.save(_test_hardware_id, data)
 
@@ -260,7 +305,7 @@ func test_disabling_toggle_persists() -> void:
 	manager.per_game_enabled = true
 	manager.per_game_enabled = false
 
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	assert_false(data["per_game_enabled"])
 
 
@@ -273,10 +318,12 @@ func test_snapshot_bundles_curves_from_every_fan_engine() -> void:
 	# FanModeManager would for a multi-fan backend.
 	var second_engine := mode_manager._ensure_curve_engine("fan-1")
 	second_engine.start(backend, "fan-1", {10: 3, 20: 6})
+	profiles_panel.refresh(store, _test_hardware_id, mode_manager.get_all_curve_engines())
 
 	_engine().set_point(30, 77.0)
+	profiles_panel.apply_current()
 
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	var saved_curve: Dictionary = data["game_curves"]["hades"]["curve"]
 	assert_true(saved_curve.has(_fan_id))
 	assert_true(saved_curve.has("fan-1"))

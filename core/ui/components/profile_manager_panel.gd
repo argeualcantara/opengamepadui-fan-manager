@@ -283,7 +283,12 @@ func _commit_save(profile_name: String) -> void:
 	_close_dropdown()
 	_close_new_name_form()
 	_set_dirty(false)
+	# Emitted before flush() on purpose: GameCurveManager listens to
+	# this and enqueues a per-game snapshot job in response (see
+	# store.enqueue()'s doc comment) — flush() below is what actually
+	# runs that job and writes everything to disk in one shot.
 	active_profile_changed.emit(profile_name)
+	store.flush()
 
 
 ## Commits every fan's draft curve to hardware and disk, straight to
@@ -297,11 +302,12 @@ func apply_current() -> void:
 	_commit_save(profile_name)
 
 
-## Persists profile_name as the active profile to disk.
+## Stages profile_name as the active profile. In-memory only — see
+## _commit_save(), which is the only caller and flushes once at its
+## own end.
 func _persist_active_profile(profile_name: String) -> void:
-	var data: Dictionary = store.load_data(hardware_id)
-	data["active_profile"] = profile_name
-	store.save(hardware_id, data)
+	store.load_data(hardware_id)
+	store.set_active_profile(profile_name)
 
 
 ## Updates _dirty and emits dirty_changed, but only on an actual change.

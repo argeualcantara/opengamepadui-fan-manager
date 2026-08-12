@@ -131,6 +131,11 @@ func _on_mode_selected(index: int) -> void:
 		_select_dropdown_for_mode(mode_manager.current_mode)
 		return
 
+	# This is a standalone, top-level operation (not part of a bigger
+	# restore-a-saved-context transaction) — flush right away. See
+	# GameCurveManager._apply_context() for the other case, which
+	# flushes itself once its own multi-step transaction is done.
+	mode_manager.store.flush()
 	error_label.visible = false
 	_select_dropdown_for_mode(mode_id)
 
@@ -185,7 +190,9 @@ func _resync_fan_editors() -> void:
 ## Commits whatever's currently on the sliders (the draft curve) to
 ## hardware and disk, standing in for ProfileManagerPanel's own Save
 ## button while its picker UI is hidden: see
-## ProfileManagerPanel.apply_current().
+## ProfileManagerPanel.apply_current(). Its active_profile_changed
+## signal (emitted at the end of every commit) is what tells
+## GameCurveManager to snapshot the per-game context, if enabled.
 func _on_apply_pressed() -> void:
 	profiles_panel.apply_current()
 

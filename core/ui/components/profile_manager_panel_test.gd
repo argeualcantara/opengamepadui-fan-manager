@@ -64,7 +64,7 @@ func test_saving_a_new_profile_adds_it_and_clears_dirty() -> void:
 	assert_false(panel.trigger.pending)
 	assert_eq(panel.trigger.profile_name, "Silencioso")
 
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	# JSON round-trip turns keys back into Strings: normalize before
 	# comparing against the engine's int-keyed in-memory curve. A saved
 	# profile bundles one curve per fan_id (tasks/14).
@@ -84,7 +84,7 @@ func test_saving_with_existing_name_shows_overwrite_confirmation_instead_of_savi
 
 	assert_true(panel.overwrite_box.visible)
 	# Must not have overwritten yet: original value untouched.
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	assert_eq(data["profiles"]["Existente"], {_fan_id: {"10": 1}})
 
 
@@ -97,7 +97,7 @@ func test_confirming_overwrite_replaces_profile_without_duplicating() -> void:
 	panel._confirm_overwrite()
 
 	assert_eq(panel._rows.size(), 1, "overwriting must not create a duplicate entry")
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	assert_eq(
 		FanCurveUtils.normalize_keys(data["profiles"]["Existente"][_fan_id]),
 		curve_engine.get_curve()
@@ -138,7 +138,7 @@ func test_deleting_active_profile_keeps_curve_but_clears_active_marker() -> void
 
 	assert_eq(panel._rows.size(), 0)
 	assert_true(panel.trigger.pending, "picker must fall back to pending once its active profile is gone")
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	assert_eq(data.get("active_profile"), null)
 	# The working curve itself is untouched by deleting its saved name.
 	assert_true(curve_engine.get_curve().has(10))
@@ -241,7 +241,7 @@ func test_saving_bundles_curves_from_every_fan_engine() -> void:
 	panel.name_input.text = "Duas Fans"
 	panel._try_save()
 
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	var saved: Dictionary = data["profiles"]["Duas Fans"]
 	assert_true(saved.has(_fan_id))
 	assert_true(saved.has("fan-1"))
@@ -264,7 +264,7 @@ func test_save_button_commits_directly_when_a_profile_is_already_active() -> voi
 	assert_false(panel.new_name_form.visible, "an already-active profile must not prompt for a name")
 	assert_eq(backend.applied_curves.size(), 1)
 	assert_eq(backend.applied_curves[0][10], 42.0)
-	var data := store.load(_test_hardware_id)
+	var data := store.load_data(_test_hardware_id)
 	assert_eq(
 		FanCurveUtils.normalize_keys(data["profiles"]["Perfil"][_fan_id])[10],
 		42.0

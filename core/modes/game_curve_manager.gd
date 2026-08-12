@@ -1,15 +1,21 @@
 extends Node
 class_name GameCurveManager
 
-## Applies and continuously updates a full fan mode/profile/curve
-## snapshot per "context" (a running game, or the Steam home screen
-## when nothing is running).
+## Applies and snapshots a full fan mode/profile/curve config per
+## "context" (a running game, or the Steam home screen when nothing is
+## running).
 ##
 ## Disabled by default (per_game_enabled == false). When enabled:
 ## - Switching context with a saved config applies it in full (mode,
 ##   profile, curve). With no saved config, nothing changes.
-## - Any relevant state change while a context is active gets captured
-##   into that context's config; there's no manual "assign" UI.
+## - Mode/profile changes (already discrete, deliberate actions) are
+##   captured into the active context's config immediately. Curve edits
+##   are NOT: dragging a slider never writes anything (mirrors
+##   CustomCurveEngine's own draft/committed split — see its doc
+##   comment). The curve is only snapshotted when ModeSelectOverlay's
+##   Apply button commits the draft to hardware and ProfileManagerPanel
+##   reports the resulting active_profile_changed — see
+##   _on_state_changed() below.
 ##
 ## Referenced via preload()'d consts, not bare class_name lookups: see
 ## hwmon_fan_backend.gd's header comment for why.
@@ -83,9 +89,8 @@ func _ready() -> void:
 
 	launch_manager.app_switched.connect(_on_app_switched)
 	launch_manager.all_apps_stopped.connect(_on_all_apps_stopped)
-	mode_manager.mode_changed.connect(_on_mode_changed)
+	mode_manager.mode_changed.connect(_on_state_changed)
 	profiles_panel.active_profile_changed.connect(_on_state_changed)
-	_sync_curve_engine_connections()
 
 	logger.debug(
 		"_ready(): active_game_context='%s' per_game_enabled=%s"
@@ -122,38 +127,19 @@ func _on_all_apps_stopped() -> void:
 	_apply_or_track(null)
 
 
-func _on_mode_changed(_mode: String) -> void:
-	# Reconnects on every mode change so newly-created engines (Custom
-	# Mode creates them lazily per fan) get tracked too.
-	_sync_curve_engine_connections()
-	_on_state_changed()
-
-
-## Connects curve_changed on every current CustomCurveEngine to
-## _on_curve_changed, skipping engines already connected.
-func _sync_curve_engine_connections() -> void:
-	var engines := mode_manager.get_all_curve_engines()
-	var newly_connected := 0
-	for engine in engines.values():
-		if not engine.curve_changed.is_connected(_on_curve_changed):
-			engine.curve_changed.connect(_on_curve_changed)
-			newly_connected += 1
-	if newly_connected > 0:
-		logger.debug(
-			"_sync_curve_engine_connections(): connected %d new engine(s), %d total"
-			% [newly_connected, engines.size()]
-		)
-
-
-## Signal handler for mode_changed/active_profile_changed: any relevant
-## state change gets captured into the active context's config.
+## Signal handler for mode_changed/active_profile_changed: those are
+## already discrete, deliberate actions (not a continuous drag), so
+## they're captured into the active context's config. Only enqueues —
+## never flushes: whoever triggered the signal (ModeSelectOverlay,
+## ProfileManagerPanel, or GameCurveManager's own _apply_context())
+## owns flushing once its own top-level operation is fully settled.
+## See store.enqueue()'s doc comment for why the read has to be lazy.
 func _on_state_changed(_arg = null) -> void:
-	_snapshot_and_save()
+	if not per_game_enabled or active_game_context.is_empty():
+		return
 
-
-## Signal handler for CustomCurveEngine.curve_changed.
-func _on_curve_changed(_curve: Dictionary) -> void:
-	_snapshot_and_save()
+	var context_key := active_game_context
+	store.enqueue(func(): _snapshot(context_key))
 
 
 ## Derives the context key for to (a running app, or null for Steam
@@ -188,14 +174,21 @@ func _apply_or_track(to) -> void:
 ## the profile picker UI hidden, every context shares the same single
 ## "Default" profile record, so applying by name would load whichever
 ## context last overwrote it instead of this context's own curve.
-## saved["curve"] is captured live per-context (see _snapshot_and_save())
-## and is the only thing that actually isolates one context from another.
+## saved["curve"] is captured live per-context (see _snapshot()) and
+## is the only thing that actually isolates one context from another.
 func _apply_context(saved: Dictionary) -> void:
 	var mode: String = saved.get("mode", "")
 	logger.debug("_apply_context('%s'): %s" % [active_game_context, saved])
 	if mode.is_empty():
 		return
 
+	# set_mode() only mutates the in-memory document and enqueues (via
+	# _on_state_changed(), if it actually changes mode) — it never
+	# flushes. That's what makes it safe to call here even though the
+	# curve below hasn't been loaded yet: nothing hits disk until this
+	# function's own flush() at the bottom, by which point the queued
+	# snapshot job (if any) reads the curve loaded below, not whatever
+	# was in the engine before this call.
 	if not mode_manager.set_mode(mode):
 		logger.warn(
 			"Saved mode '%s' for context '%s' is no longer valid; keeping current mode"
@@ -205,61 +198,56 @@ func _apply_context(saved: Dictionary) -> void:
 
 	logger.info("Applied per-game config for context '%s'" % active_game_context)
 
-	if mode != "custom":
-		return
+	if mode == "custom":
+		var curve: Dictionary = saved.get("curve", {})
+		var engines := mode_manager.get_all_curve_engines()
+		logger.debug("_apply_context('%s'): loading raw per-fan curve %s" % [active_game_context, curve])
+		for fan_id in curve:
+			if engines.has(fan_id):
+				engines[fan_id].load_curve(curve[fan_id])
 
-	var curve: Dictionary = saved.get("curve", {})
-	var engines := mode_manager.get_all_curve_engines()
-	logger.debug("_apply_context('%s'): loading raw per-fan curve %s" % [active_game_context, curve])
-	for fan_id in curve:
-		if engines.has(fan_id):
-			engines[fan_id].load_curve(curve[fan_id])
+		curve_applied.emit()
 
-	curve_applied.emit()
+	store.flush()
 
 
-## Captures the current mode/active_profile/per-fan curves and saves
-## them under the active context's key. No-op if per_game_enabled is
-## off, no context is active, or no curve engines exist yet.
-func _snapshot_and_save() -> void:
-	if not per_game_enabled or active_game_context.is_empty():
-		return
-
+## Runs (only from inside store.flush(), via the job enqueued in
+## _on_state_changed()) to capture the current mode/active_profile/
+## per-fan curves and stage them under context_key. No-op if there are
+## no curve engines yet.
+func _snapshot(context_key: String) -> void:
 	var engines := mode_manager.get_all_curve_engines()
 	if engines.is_empty():
-		logger.debug("_snapshot_and_save('%s'): no curve engines yet, skipping" % active_game_context)
+		logger.debug("_snapshot('%s'): no curve engines yet, skipping" % context_key)
 		return
 
 	var curve: Dictionary = {}
 	for fan_id in engines:
 		curve[fan_id] = engines[fan_id].get_curve()
 
-	var data: Dictionary = store.load_data(hardware_id)
-	var game_curves: Dictionary = data.get("game_curves", {})
-	game_curves[active_game_context] = {
-		"mode": mode_manager.current_mode,
-		"active_profile": data.get("active_profile"),
-		"curve": curve,
-	}
-	data["game_curves"] = game_curves
-	store.save(hardware_id, data)
+	var active_profile = store.load_data(hardware_id).get("active_profile")
+	store.set_game_curve(context_key, mode_manager.current_mode, active_profile, curve)
 	logger.debug(
-		"Saved per-game config for context '%s': mode='%s' active_profile=%s"
-		% [active_game_context, mode_manager.current_mode, data.get("active_profile")]
+		"Staged per-game config for context '%s': mode='%s' active_profile=%s"
+		% [context_key, mode_manager.current_mode, active_profile]
 	)
 
 
-## Persists the per_game_enabled toggle to disk.
+## Persists the per_game_enabled toggle. Standalone operation (not
+## part of a bigger transaction), so it flushes immediately.
 func _persist_enabled(value: bool) -> void:
 	logger.debug("Persisting per_game_enabled=%s" % value)
-	var data: Dictionary = store.load_data(hardware_id)
-	data["per_game_enabled"] = value
-	store.save(hardware_id, data)
+	store.load_data(hardware_id)
+	store.set_per_game_enabled(value)
+	store.flush()
 
 
-## Persists context_key as the active game context to disk.
+## Persists context_key as the active game context. Standalone
+## operation, flushes immediately — independent of whether
+## _apply_context() also runs (and flushes again) right after, for a
+## context that has a saved config.
 func _persist_active_context(context_key: String) -> void:
 	logger.debug("Persisting active_game_context='%s'" % context_key)
-	var data: Dictionary = store.load_data(hardware_id)
-	data["active_game_context"] = context_key
-	store.save(hardware_id, data)
+	store.load_data(hardware_id)
+	store.set_active_game_context(context_key)
+	store.flush()
