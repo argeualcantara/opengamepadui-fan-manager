@@ -24,19 +24,6 @@ var mode_manager: FanModeManager
 var mode_select_overlay: ModeSelectOverlay
 var game_curve_manager: GameCurveManager
 
-## Bounded retries for the Quick Bar Menu to exist: OGUI's
-## PluginLoader.init() is called from CardUiOverlayMode._init(), which
-## runs before that scene (and its QuickBarMenu child, the sole member
-## of the "quick-bar" group Plugin.add_to_quick_bar() looks up) has
-## entered the tree — plugin_manager is add_child()'d during that
-## _init(), landing at a lower sibling index than QuickBarMenu, so its
-## whole ready-cascade (including this plugin) runs before QuickBarMenu
-## even enters the tree. add_to_quick_bar() has no retry of its own —
-## it just silently no-ops if the group is empty — so without this
-## wait, the card is never added at all. Total worst-case wait: ~2s.
-const QUICK_BAR_WAIT_RETRIES := 20
-const QUICK_BAR_WAIT_DELAY := 0.1
-
 
 func _ready() -> void:
 	registry = FanBackendRegistry.new()
@@ -51,8 +38,6 @@ func _ready() -> void:
 
 	mode_select_overlay = load(plugin_base + "/core/ui/mode_select_overlay.tscn").instantiate()
 	mode_select_overlay.mode_manager = mode_manager
-
-	await _wait_for_quick_bar_menu()
 	# Registers a card in the Quick Bar menu (same menu as "Quick
 	# Settings"/"Performance"): NOT add_overlay()/OverlayContainer,
 	# which --overlay-mode's scene doesn't even instantiate. See
@@ -75,17 +60,6 @@ func _ready() -> void:
 		)
 		add_child(game_curve_manager)
 		mode_select_overlay.bind_game_curve_manager(game_curve_manager)
-
-
-## Polls until a node in the "quick-bar" group exists (or retries run
-## out, logged and left for add_to_quick_bar() to fail its own way).
-func _wait_for_quick_bar_menu() -> void:
-	for attempt in range(QUICK_BAR_WAIT_RETRIES):
-		if get_tree().get_first_node_in_group("quick-bar"):
-			return
-		if attempt < QUICK_BAR_WAIT_RETRIES - 1:
-			await get_tree().create_timer(QUICK_BAR_WAIT_DELAY).timeout
-	logger.warn("Quick Bar Menu did not appear after %d attempts" % QUICK_BAR_WAIT_RETRIES)
 
 
 func get_settings_menu() -> Control:
