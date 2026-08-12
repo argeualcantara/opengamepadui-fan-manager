@@ -19,6 +19,18 @@ const ProfileManagerPanel = preload("res://plugins/fan-manager/core/ui/component
 
 const STEAM_HOME_KEY := "__steam_home__"
 
+## Fired after _apply_context() loads a per-context curve directly into
+## the curve engines. CustomCurveEngine.load_curve() deliberately does
+## not emit curve_changed (see its doc comment), so nothing else tells
+## a visible CustomCurveEditor to redraw with the new values — the UI
+## only otherwise resyncs on FanModeManager.mode_changed, which no
+## longer fires for a same-mode context switch (see the no-op guard in
+## FanModeManager.set_mode()). Listeners should re-pull the curve from
+## the engine (e.g. ModeSelectOverlay re-calling CustomCurveEditor.
+## bind_engine()) to bring the displayed sliders back in sync with the
+## hardware/engine state.
+signal curve_applied()
+
 var logger := Log.get_logger("FanManager GameCurveManager")
 
 ## Untyped on purpose: only used via .app_switched/.get_current_app()
@@ -138,6 +150,8 @@ func _apply_or_track(to) -> void:
 		return
 
 	var data: Dictionary = store.load_data(hardware_id)
+	logger.debug("_apply_or_track('%s'): full saved config: %s" % [context_key, JSON.stringify(data, "\t")])
+
 	var game_curves: Dictionary = data.get("game_curves", {})
 	if game_curves.has(context_key):
 		logger.debug("_apply_or_track('%s'): found saved config, applying" % context_key)
@@ -178,6 +192,8 @@ func _apply_context(saved: Dictionary) -> void:
 	for fan_id in curve:
 		if engines.has(fan_id):
 			engines[fan_id].load_curve(curve[fan_id])
+
+	curve_applied.emit()
 
 
 ## Captures the current mode/active_profile/per-fan curves and saves
