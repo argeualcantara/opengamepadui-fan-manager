@@ -52,6 +52,8 @@ func _ready() -> void:
 		)
 		add_child(game_curve_manager)
 		mode_select_overlay.bind_game_curve_manager(game_curve_manager)
+		var data: Dictionary = store.load_data(mode_manager.hardware_id)
+		logger.debug("full saved config on plugin load: %s" % JSON.stringify(data, "\t"))
 
 
 func get_settings_menu() -> Control:
