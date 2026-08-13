@@ -72,6 +72,12 @@ var per_game_enabled: bool = false:
 			# in custom mode; no-op (with a log warning) if "Default"
 			# doesn't exist yet.
 			profiles_panel.apply_profile(FanCurveUtils.DEFAULT_PROFILE_NAME)
+			# apply_profile() updates the engines (and hardware) directly
+			# but never emits curve_applied — unlike _apply_context()/
+			# _on_mode_changed() below, which always do. Without this,
+			# the curve underneath changes but the visible sliders never
+			# get told to re-pull it (see curve_applied's doc comment).
+			curve_applied.emit()
 
 
 ## Wires dependencies in: launch_manager (game switch events, and
