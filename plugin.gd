@@ -40,7 +40,7 @@ func _ready() -> void:
 	# Adds a Quick Bar card
 	await get_tree().create_timer(30.0).timeout
 
-	quick_bars := get_tree().get_nodes_in_group("quick-bar")
+	quick_bars = get_tree().get_nodes_in_group("quick-bar")
 	add_to_quick_bar(mode_select_overlay, null)
 	logger.warning("AFER WAIT: Quick Bars found: ", quick_bars.size())
 	for qb in quick_bars:
