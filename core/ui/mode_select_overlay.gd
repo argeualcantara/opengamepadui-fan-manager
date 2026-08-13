@@ -139,24 +139,44 @@ func _on_mode_selected(index: int) -> void:
 	# bios -> custom switch.
 	_select_dropdown_for_mode(mode_id)
 
-	# Commits the mode change (tasks/18, etapa 4) through the same path
-	# the Apply button itself uses — ProfileManagerPanel._commit_save()
-	# already knows how to write game_curves[contexto] (per-game on) or
-	# profiles["Default"] (off), so this covers both without duplicating
-	# that branching here. Matches the philosophy already documented for
-	# per-game contexts: mode changes are discrete, deliberate actions
-	# captured immediately, unlike a curve edit sitting on the sliders.
-	logger.debug("_on_mode_selected(%d): auto-committing via apply_current() (reason: mode changed to '%s')" % [index, mode_id])
-	profiles_panel.apply_current()
+	if mode_id == "custom":
+		# Commits the mode change (tasks/18, etapa 4) through the same path
+		# the Apply button itself uses — ProfileManagerPanel._commit_save()
+		# already knows how to write game_curves[contexto] (per-game on) or
+		# profiles["Default"] (off), so this covers both without duplicating
+		# that branching here. Matches the philosophy already documented for
+		# per-game contexts: mode changes are discrete, deliberate actions
+		# captured immediately, unlike a curve edit sitting on the sliders.
+		logger.debug("_on_mode_selected(%d): auto-committing via apply_current() (reason: mode changed to '%s')" % [index, mode_id])
+		profiles_panel.apply_current()
+	elif game_curve_manager:
+		# Switching to bios must NOT go through apply_current(): its
+		# engine.commit_draft() -> AsusWmiFanBackend.apply_custom_curve()
+		# silently flips pwm_enable back to manual whenever it isn't
+		# already (confirmed on real hardware, tasks/18) — undoing the
+		# bios switch set_mode() just made, at the hardware level, the
+		# instant it's made. There's also nothing new to push: the curve
+		# itself didn't change, only the mode did, so neither the
+		# hardware commit nor a profiles["Default"] write serve any
+		# purpose here. Trigger the COMMITTED transition directly instead
+		# — _on_curve_session_committed() still persists
+		# game_curves[context].mode = "bios" (preserving the existing
+		# curve, see _snapshot()'s bios branch), with zero engine/hardware
+		# involvement.
+		logger.debug("_on_mode_selected(%d): committing via curve_session.apply_pressed() (reason: mode changed to '%s', no hardware push needed)" % [index, mode_id])
+		game_curve_manager.curve_session.apply_pressed()
 
 	# Standalone, top-level operation (not part of a bigger
 	# restore-a-saved-context transaction) — flush right away. See
 	# GameCurveManager._apply_context() for the other case, which
 	# flushes itself once its own multi-step transaction is done.
-	# apply_current() above already flushes on its own successful path;
-	# this is a defensive fallback for its early-return branches (e.g.
-	# no curve engines yet), so the mode switch itself is never left
-	# unpersisted.
+	# Required, not just defensive, for the bios branch above:
+	# curve_session.apply_pressed() only enqueues the game_curves job
+	# (via _on_curve_session_committed()) — nothing else drains it. The
+	# custom-mode branch already flushes on its own successful path
+	# (via apply_current()); this covers that path's early-return
+	# branches (e.g. no curve engines yet), so the mode switch itself
+	# is never left unpersisted either way.
 	mode_manager.store.flush()
 
 

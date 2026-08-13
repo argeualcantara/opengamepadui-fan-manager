@@ -41,6 +41,7 @@ class StubBackend extends FanBackend:
 	var supported := true
 	var hardware_id_value := "gut-gamecurve-test"
 	var bios_curve := {10: 0, 20: 0, 30: 15, 40: 25, 50: 35, 60: 45, 70: 60, 80: 75, 90: 90, 100: 100}
+	var applied_curves: Array[Dictionary] = []
 
 	func is_supported() -> bool:
 		return supported
@@ -57,7 +58,8 @@ class StubBackend extends FanBackend:
 	func set_mode(_mode: String) -> bool:
 		return true
 
-	func apply_custom_curve(_fan_id: String, _curve: Dictionary) -> bool:
+	func apply_custom_curve(_fan_id: String, curve: Dictionary) -> bool:
+		applied_curves.append(curve.duplicate(true))
 		return true
 
 	func read_temperature(_fan_id: String) -> float:
@@ -229,11 +231,16 @@ func test_pressing_apply_saves_the_current_curve_for_active_context() -> void:
 
 func test_switching_to_bios_persists_the_mode_change_for_the_active_context() -> void:
 	# Regression for the gap found after etapa 1: switching to BIOS
-	# must still persist game_curves[contexto], same as it always has —
-	# now via ModeSelectOverlay._on_mode_selected()'s auto-apply
-	# (tasks/18, etapa 4) instead of the removed _on_state_changed().
-	# Simulates exactly what that handler does: set_mode() then
-	# profiles_panel.apply_current().
+	# must still persist game_curves[contexto], same as it always has.
+	# Simulates exactly what ModeSelectOverlay._on_mode_selected() does
+	# for a bios target (tasks/18, revised after etapa 4): set_mode()
+	# then curve_session.apply_pressed() directly — NOT
+	# profiles_panel.apply_current(), which would call
+	# engine.commit_draft() and, on real ASUS hardware, silently flip
+	# pwm_enable back to manual right after set_mode() just switched it
+	# to bios (confirmed via device log). Going to bios never needs a
+	# hardware push or a profiles["Default"] write: the curve itself
+	# didn't change, only the mode did.
 	var data := store.load_data(_test_hardware_id)
 	data["game_curves"] = {
 		"hades": {"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 5, 20: 10}}}
@@ -245,7 +252,8 @@ func test_switching_to_bios_persists_the_mode_change_for_the_active_context() ->
 	assert_eq(mode_manager.current_mode, "custom")
 
 	mode_manager.set_mode("bios")
-	profiles_panel.apply_current()
+	manager.curve_session.apply_pressed()
+	store.flush()
 
 	var reloaded := store.load_data(_test_hardware_id)
 	assert_eq(reloaded["game_curves"]["hades"]["mode"], "bios")
@@ -253,6 +261,30 @@ func test_switching_to_bios_persists_the_mode_change_for_the_active_context() ->
 		reloaded["game_curves"]["hades"]["curve"][_fan_id]
 	)
 	assert_eq(saved_curve, {10: 5.0, 20: 10.0}, "curve must survive a switch to bios, unedited")
+
+
+func test_switching_to_bios_does_not_commit_the_draft_curve_to_hardware() -> void:
+	# Regression for the bug found via real device log (tasks/18): the
+	# old etapa 4 design routed every mode switch through
+	# profiles_panel.apply_current(), which calls engine.commit_draft()
+	# unconditionally. On real ASUS hardware, apply_custom_curve()
+	# itself flips pwm_enable back to manual whenever it isn't already
+	# — silently undoing the bios switch set_mode() just made, at the
+	# hardware level, the instant apply_current() ran. Simulating the
+	# corrected ModeSelectOverlay behavior (curve_session.apply_pressed()
+	# instead of apply_current() for a bios target) must not touch the
+	# backend at all.
+	mode_manager.set_mode("custom")
+	backend.applied_curves = []
+
+	mode_manager.set_mode("bios")
+	manager.curve_session.apply_pressed()
+	store.flush()
+
+	assert_true(
+		backend.applied_curves.is_empty(),
+		"switching to bios must never push a curve to hardware"
+	)
 
 
 func test_switching_mode_with_toggle_off_saves_the_current_curve_to_default_profile() -> void:
