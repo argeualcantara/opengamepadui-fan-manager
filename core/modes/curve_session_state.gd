@@ -28,11 +28,25 @@ enum State { UNTRACKED, LOADED, DIRTY, COMMITTED }
 ## instead of a real game/Steam Home name.
 const DEFAULT_PROFILE_CONTEXT_KEY := "__default__"
 
-signal state_changed(state: State, context_key: String)
+## state's parameter/var are deliberately untyped (not `: State`), even
+## though this file is exactly where State is defined: OGUI loads
+## plugins from a zip via ProjectSettings.load_resource_pack(), which
+## never populates Godot's global class_name cache (see
+## hwmon_fan_backend.gd's header comment for the canonical writeup of
+## this gotcha). Under that loading path, this file's own bare `State`
+## and `CurveSessionState.State` as seen through the preload()'d const
+## other scripts use (game_curve_manager.gd, mode_select_overlay.gd)
+## can end up as two distinct type identities for the compiler, which
+## fails the whole plugin to compile with "Cannot assign a value of
+## type CurveSessionState.State to variable "state" with specified
+## type State" — confirmed on real hardware (tasks/18). Untyped avoids
+## the cross-script identity check entirely; enums are just ints at
+## runtime, so this costs only compile-time checking within this file.
+signal state_changed(state, context_key: String)
 
 var logger := Log.get_logger("FanManager CurveSessionState")
 
-var state: State = State.UNTRACKED
+var state = State.UNTRACKED
 var context_key: String = ""
 
 
