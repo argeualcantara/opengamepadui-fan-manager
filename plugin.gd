@@ -2,13 +2,8 @@ extends Plugin
 
 ## The types below are this plugin's own (FanBackendRegistry,
 ## FanCurveStore, FanModeManager, ModeSelectOverlay, GameCurveManager,
-## AsusWmiFanBackend, HwmonFanBackend) and are referenced via
-## preload()'d consts, not bare class_name lookups: OGUI loads plugins
-## from a zip at runtime (ProjectSettings.load_resource_pack()), which
-## never populates Godot's global class_name cache, so bare names fail
-## to resolve outside the file that declares them. QuickBarCard,
-## LaunchManager, and Plugin below are OGUI's own core classes,
-## compiled into the base game normally, so they resolve fine as bare names.
+## AsusWmiFanBackend, HwmonFanBackend).
+
 const FanBackendRegistry = preload("res://plugins/fan-manager/core/backends/fan_backend_registry.gd")
 const FanCurveStore = preload("res://plugins/fan-manager/core/persistence/fan_curve_store.gd")
 const FanModeManager = preload("res://plugins/fan-manager/core/modes/fan_mode_manager.gd")
@@ -36,7 +31,9 @@ func _ready() -> void:
 
 	mode_select_overlay = load(plugin_base + "/core/ui/mode_select_overlay.tscn").instantiate()
 	mode_select_overlay.mode_manager = mode_manager
-	# Adds a Quick Bar card, not add_overlay()
+
+	# Adds a Quick Bar card
+	await get_tree().create_timer(20.0).timeout
 	add_to_quick_bar(mode_select_overlay, null)
 
 	# profiles_panel only resolves once add_to_quick_bar() above has run

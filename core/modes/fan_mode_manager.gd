@@ -8,6 +8,7 @@ class_name FanModeManager
 ##
 ## Referenced via preload()'d consts, not bare class_name lookups: see
 ## hwmon_fan_backend.gd's header comment for why.
+
 const FanBackendRegistry = preload("res://plugins/fan-manager/core/backends/fan_backend_registry.gd")
 const FanCurveStore = preload("res://plugins/fan-manager/core/persistence/fan_curve_store.gd")
 const CustomCurveEngine = preload("res://plugins/fan-manager/core/engine/custom_curve_engine.gd")
@@ -104,14 +105,14 @@ func set_mode(mode: String) -> bool:
 	# Already in this mode: skip the stop/restart cycle entirely. This
 	# matters for GameCurveManager, which calls set_mode("custom") to
 	# restore a per-context config even when already in Custom Mode
-	# (switching contexts never leaves Custom Mode) — without this
+	# (switching contexts never leaves Custom Mode), without this
 	# guard, _start_custom_mode() would reuse whichever curve is
 	# currently in memory (the previous context's) and briefly reapply
 	# it to hardware, and the resulting mode_changed emission would
 	# trigger a premature snapshot save with that stale curve, before
 	# the caller gets a chance to load the correct context's curve.
 	if mode == current_mode:
-		logger.debug("set_mode('%s'): already in this mode, no-op" % mode)
+		logger.debug("set_mode('%s'): already in this mode" % mode)
 		return true
 
 	var previous_mode := current_mode if not current_mode.is_empty() else "(none)"
@@ -233,7 +234,7 @@ func _adopt_current_custom_curve() -> void:
 		engine.start(backend, fan_id, curve)
 
 
-## In-memory only — no disk write here. Callers (_ready(),
+## In-memory only, no disk write here. Callers (_ready(),
 ## _apply_context() via GameCurveManager, ModeSelectOverlay) are
 ## responsible for calling store.flush() once their own top-level
 ## operation is fully done.
@@ -242,8 +243,6 @@ func _persist_active_mode(mode: String) -> void:
 	store.load_data(hardware_id)
 	store.set_active_mode(mode)
 
-
-## In-memory only — see _persist_active_mode()'s doc comment.
 func _persist_active_profile(profile_name: String) -> void:
 	logger.debug("Persisting active_profile='%s' for hardware '%s'" % [profile_name, hardware_id])
 	store.load_data(hardware_id)

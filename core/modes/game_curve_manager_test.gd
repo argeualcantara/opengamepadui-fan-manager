@@ -192,7 +192,7 @@ func test_mode_change_with_toggle_on_saves_full_state_for_active_context() -> vo
 	# A bare set_mode() no longer persists anything by itself (tasks/18,
 	# etapa 4): production drives this through ModeSelectOverlay.
 	# _on_mode_selected(), which calls profiles_panel.apply_current()
-	# right after a successful set_mode() — that's what actually
+	# right after a successful set_mode(), that's what actually
 	# commits curve_session to COMMITTED and triggers the game_curves
 	# write, via GameCurveManager._on_curve_session_committed().
 	profiles_panel.apply_current()
@@ -203,7 +203,7 @@ func test_mode_change_with_toggle_on_saves_full_state_for_active_context() -> vo
 
 
 func test_curve_edit_alone_does_not_save_a_config() -> void:
-	# Dragging a slider must never write anything by itself — only
+	# Dragging a slider must never write anything by itself, only
 	# pressing Apply (profiles_panel.apply_current(), which commits the
 	# draft to hardware and emits active_profile_changed) does.
 	manager.per_game_enabled = true
@@ -234,7 +234,7 @@ func test_switching_to_bios_persists_the_mode_change_for_the_active_context() ->
 	# must still persist game_curves[contexto], same as it always has.
 	# Simulates exactly what ModeSelectOverlay._on_mode_selected() does
 	# for a bios target (tasks/18, revised after etapa 4): set_mode()
-	# then curve_session.apply_pressed() directly — NOT
+	# then curve_session.apply_pressed() directly, NOT
 	# profiles_panel.apply_current(), which would call
 	# engine.commit_draft() and, on real ASUS hardware, silently flip
 	# pwm_enable back to manual right after set_mode() just switched it
@@ -269,7 +269,7 @@ func test_switching_to_bios_does_not_commit_the_draft_curve_to_hardware() -> voi
 	# profiles_panel.apply_current(), which calls engine.commit_draft()
 	# unconditionally. On real ASUS hardware, apply_custom_curve()
 	# itself flips pwm_enable back to manual whenever it isn't already
-	# — silently undoing the bios switch set_mode() just made, at the
+	#, silently undoing the bios switch set_mode() just made, at the
 	# hardware level, the instant apply_current() ran. Simulating the
 	# corrected ModeSelectOverlay behavior (curve_session.apply_pressed()
 	# instead of apply_current() for a bios target) must not touch the
@@ -289,7 +289,7 @@ func test_switching_to_bios_does_not_commit_the_draft_curve_to_hardware() -> voi
 
 func test_switching_mode_with_toggle_off_saves_the_current_curve_to_default_profile() -> void:
 	# Gap found in review: with per-game off, a mode switch previously
-	# didn't save anything to profiles["Default"] at all — only
+	# didn't save anything to profiles["Default"] at all, only
 	# ProfileManagerPanel._commit_save() did, and only from a real
 	# Apply press. Now ModeSelectOverlay._on_mode_selected() calls
 	# apply_current() on every mode switch too, so an edit made just
@@ -325,12 +325,12 @@ func test_applying_saved_context_with_a_mode_change_does_not_corrupt_the_saved_c
 	# Regression test: current mode starts as "bios" (fresh store), so
 	# applying this saved "custom" context makes set_mode() actually
 	# switch mode (not the same-mode no-op) and emit mode_changed
-	# mid-_apply_context() — before store.flush() at the bottom. The
+	# mid-_apply_context(), before store.flush() at the bottom. The
 	# curve reload itself (see GameCurveManager._on_curve_session_loaded(),
 	# tasks/18 etapa 3) runs synchronously off that same mode_changed,
 	# via curve_session's LOADED transition, before the enqueued
 	# snapshot job (lazy, only runs inside flush()) ever reads the
-	# engines — so the snapshot always sees the corrected curve, never
+	# engines, so the snapshot always sees the corrected curve, never
 	# whatever _start_custom_mode() had just seeded as a placeholder.
 	var data := store.load_data(_test_hardware_id)
 	data["game_curves"] = {

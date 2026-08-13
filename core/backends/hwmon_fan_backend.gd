@@ -5,7 +5,7 @@ class_name HwmonFanBackend
 ## interface (/sys/class/hwmon), used when no hardware-specific backend
 ## recognizes the device. Single-fan devices use the bare hwmon device
 ## path as fan_id; devices with matched pwm<N>/temp<N>_input pairs (e.g.
-## CPU+GPU handhelds) split into "<device path>#<channel>" fan_ids —
+## CPU+GPU handhelds) split into "<device path>#<channel>" fan_ids,
 ## see _resolve_fan_channels().
 ##
 

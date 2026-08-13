@@ -92,7 +92,7 @@ func _ready() -> void:
 
 ## Dropdown redirects focus to its internal OptionButton, whose own
 ## _ready() copies our focus_neighbor_bottom onto it verbatim as a raw
-## path string — one level too shallow, since option_button sits one
+## path string, one level too shallow, since option_button sits one
 ## level deeper than ModeDropdown. Recomputes it correctly via
 ## get_path_to().
 func _fix_dropdown_focus_neighbor() -> void:
@@ -132,51 +132,15 @@ func _on_mode_selected(index: int) -> void:
 		return
 
 	error_label.visible = false
-	# Must run before apply_current() below: it's what (re)populates
-	# profiles_panel.curve_engines from whatever engines set_mode() may
-	# have just created — calling apply_current() any earlier would hit
-	# its "no curve engines yet" guard on this session's very first
-	# bios -> custom switch.
 	_select_dropdown_for_mode(mode_id)
 
 	if mode_id == "custom":
-		# Commits the mode change (tasks/18, etapa 4) through the same path
-		# the Apply button itself uses — ProfileManagerPanel._commit_save()
-		# already knows how to write game_curves[contexto] (per-game on) or
-		# profiles["Default"] (off), so this covers both without duplicating
-		# that branching here. Matches the philosophy already documented for
-		# per-game contexts: mode changes are discrete, deliberate actions
-		# captured immediately, unlike a curve edit sitting on the sliders.
 		logger.debug("_on_mode_selected(%d): auto-committing via apply_current() (reason: mode changed to '%s')" % [index, mode_id])
 		profiles_panel.apply_current()
 	elif game_curve_manager:
-		# Switching to bios must NOT go through apply_current(): its
-		# engine.commit_draft() -> AsusWmiFanBackend.apply_custom_curve()
-		# silently flips pwm_enable back to manual whenever it isn't
-		# already (confirmed on real hardware, tasks/18) — undoing the
-		# bios switch set_mode() just made, at the hardware level, the
-		# instant it's made. There's also nothing new to push: the curve
-		# itself didn't change, only the mode did, so neither the
-		# hardware commit nor a profiles["Default"] write serve any
-		# purpose here. Trigger the COMMITTED transition directly instead
-		# — _on_curve_session_committed() still persists
-		# game_curves[context].mode = "bios" (preserving the existing
-		# curve, see _snapshot()'s bios branch), with zero engine/hardware
-		# involvement.
 		logger.debug("_on_mode_selected(%d): committing via curve_session.apply_pressed() (reason: mode changed to '%s', no hardware push needed)" % [index, mode_id])
 		game_curve_manager.curve_session.apply_pressed()
 
-	# Standalone, top-level operation (not part of a bigger
-	# restore-a-saved-context transaction) — flush right away. See
-	# GameCurveManager._apply_context() for the other case, which
-	# flushes itself once its own multi-step transaction is done.
-	# Required, not just defensive, for the bios branch above:
-	# curve_session.apply_pressed() only enqueues the game_curves job
-	# (via _on_curve_session_committed()) — nothing else drains it. The
-	# custom-mode branch already flushes on its own successful path
-	# (via apply_current()); this covers that path's early-return
-	# branches (e.g. no curve engines yet), so the mode switch itself
-	# is never left unpersisted either way.
 	mode_manager.store.flush()
 
 
@@ -187,9 +151,7 @@ func _on_mode_changed(mode: String) -> void:
 
 
 ## Signal handler for GameCurveManager.curve_session.state_changed
-## (tasks/18, etapa 2): the badge now reflects the state machine
-## directly instead of ProfileManagerPanel's own (now removed) dirty
-## tracking.
+## the badge now reflects the state machine directly.
 func _on_curve_session_state_changed(state: CurveSessionState.State, _context_key: String) -> void:
 	dirty_badge.visible = state == CurveSessionState.State.DIRTY
 
@@ -216,17 +178,6 @@ func _on_per_game_toggled(pressed: bool) -> void:
 ## wouldn't otherwise pick up a per-context curve switch (see
 ## curve_applied's doc comment). Re-binding forces each editor to
 ## re-pull and redraw the engine's current curve.
-##
-## Also re-runs ProfileManagerPanel.refresh() here (not just on a real
-## mode_changed): a context switch between two contexts that are both
-## already in custom mode never fires mode_changed (see the no-op
-## guard in FanModeManager.set_mode()), so _select_dropdown_for_mode()
-## below never runs either — without this, the profile picker's
-## rows/active marker would keep showing the previous context's state.
-## The "unsaved" badge itself no longer depends on this: it's driven by
-## curve_session.state_changed (tasks/18), and GameCurveManager's own
-## context_switched() call already clears DIRTY before this signal
-## fires.
 func _on_curve_applied() -> void:
 	if mode_manager.current_mode != "custom":
 		return
@@ -334,8 +285,7 @@ func _wire_focus_into_curve_editor(first_fan_id: String) -> void:
 ## Re-links every fan tab's "down" and selected_fan_id's editor's first
 ## row's "up" to each other, whenever the selected tab changes: down
 ## from any tab always goes to the selected editor's first row, up from
-## that row goes back to whichever tab is currently selected. No-op for
-## single-fan hardware (no tab bar to link).
+## that row goes back to whichever tab is currently selected.
 func _wire_tab_to_selected_editor(selected_fan_id: String) -> void:
 	if not _fan_tab_buttons.has(selected_fan_id):
 		return

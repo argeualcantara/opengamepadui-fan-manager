@@ -1,7 +1,7 @@
 extends GutTest
 
 ## Pure transition-table tests for CurveSessionState: no engines, no
-## store, no scene tree — see its own doc comment for why it's
+## store, no scene tree, see its own doc comment for why it's
 ## designed to be testable in isolation like this.
 
 var session: CurveSessionState

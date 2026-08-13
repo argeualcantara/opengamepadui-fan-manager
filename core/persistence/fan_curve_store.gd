@@ -7,7 +7,7 @@ class_name FanCurveStore
 ## in memory as a single shared document once loaded (see load_data()).
 ## Callers (FanModeManager, ProfileManagerPanel, GameCurveManager)
 ## mutate it via the set_*() methods below, then call flush() once
-## their own top-level operation is done — see enqueue()/flush()'s doc
+## their own top-level operation is done, see enqueue()/flush()'s doc
 ## comments for why a mutation that needs to read some other object's
 ## live state should go through enqueue() instead of a plain set_*()
 ## call. Full schema:
@@ -48,7 +48,7 @@ var _data: Dictionary = {}
 var _hardware_id: String = ""
 
 ## Mutations queued via enqueue(), drained by flush(). A queued
-## Callable is not run until flush() calls it — so a job that reads
+## Callable is not run until flush() calls it, so a job that reads
 ## "live" state (e.g. a CustomCurveEngine's current curve) always sees
 ## whatever that state has settled to by the time flush() actually
 ## runs, never a mid-transaction snapshot of it. See flush()'s doc
@@ -180,7 +180,7 @@ func enqueue(job: Callable) -> void:
 ## Runs every queued job in FIFO order, then writes the resulting
 ## in-memory document to disk once. Call this exactly once, at the
 ## very end of a top-level operation (a mode switch, a saved-context
-## restore, a profile save) — never from a step in the middle of one,
+## restore, a profile save), never from a step in the middle of one,
 ## or a job enqueued earlier in that same operation would still be
 ## read too early. Re-entrant calls (a job that itself calls flush())
 ## are ignored; the outer call finishes the drain.

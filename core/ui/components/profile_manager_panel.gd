@@ -277,7 +277,7 @@ func _commit_save(profile_name: String) -> void:
 	logger.info("_commit_save('%s'): committed draft curve to hardware for %d fan(s)" % [profile_name, curve_engines.size()])
 	# Emitted before flush() on purpose: GameCurveManager listens to
 	# this and enqueues a per-game snapshot job in response (see
-	# store.enqueue()'s doc comment) — flush() below is what actually
+	# store.enqueue()'s doc comment), flush() below is what actually
 	# runs that job and writes everything to disk in one shot.
 	active_profile_changed.emit(profile_name)
 	store.flush()
@@ -294,7 +294,7 @@ func apply_current() -> void:
 	_commit_save(profile_name)
 
 
-## Stages profile_name as the active profile. In-memory only — see
+## Stages profile_name as the active profile. In-memory only, see
 ## _commit_save(), which is the only caller and flushes once at its
 ## own end.
 func _persist_active_profile(profile_name: String) -> void:

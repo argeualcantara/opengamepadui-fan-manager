@@ -8,7 +8,7 @@ class_name FanBackend
 ##
 ## is_supported(), get_hardware_id(), list_fans() and _write_text() are
 ## implemented here because they were 100% identical, byte-for-byte,
-## between AsusWmiFanBackend and HwmonFanBackend — every other method
+## between AsusWmiFanBackend and HwmonFanBackend, every other method
 ## (mode switching, curve application, fan discovery) differs enough
 ## between backends that it's left for each subclass to implement.
 

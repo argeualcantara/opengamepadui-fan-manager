@@ -53,9 +53,6 @@ func _ready() -> void:
 
 	focus_entered.connect(_on_focus)
 	focus_exited.connect(_on_unfocus)
-	# Separate from _on_unfocus(), which also runs on mouse_exited (the
-	# pointer merely leaving the row, unrelated to gamepad focus) —
-	# auto-repeat must only stop when input focus itself is actually lost.
 	focus_exited.connect(_stop_hold)
 	mouse_entered.connect(_on_focus)
 	mouse_exited.connect(_on_unfocus)

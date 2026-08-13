@@ -8,7 +8,7 @@ class_name PwmIo
 ## Safety switch, ON by default: while true, write_text() only logs
 ## what it would write instead of touching the filesystem, and reports
 ## success. Single choke point for every backend's writes. No UI
-## toggle yet — flip manually here once logged writes look correct.
+## toggle yet, flip manually here once logged writes look correct.
 static var dry_run := true
 
 static var logger := Log.get_logger("FanManager PwmIo")
