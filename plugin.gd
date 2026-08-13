@@ -33,18 +33,18 @@ func _ready() -> void:
 	mode_select_overlay.mode_manager = mode_manager
 
 	var quick_bars := get_tree().get_nodes_in_group("quick-bar")
-	logger.warning("BEFORE WAIT: Quick Bars found: ", quick_bars.size())
+	print("BEFORE WAIT: Quick Bars found: ", quick_bars.size())
 	for qb in quick_bars:
-		logger.warning("Quick Bar: ", qb, " | ID: ", qb.get_instance_id())
+		print("Quick Bar: ", qb, " | ID: ", qb.get_instance_id())
 
 	# Adds a Quick Bar card
 	await get_tree().create_timer(30.0).timeout
 
 	quick_bars = get_tree().get_nodes_in_group("quick-bar")
 	add_to_quick_bar(mode_select_overlay, null)
-	logger.warning("AFER WAIT: Quick Bars found: ", quick_bars.size())
+	print("AFER WAIT: Quick Bars found: ", quick_bars.size())
 	for qb in quick_bars:
-		logger.warning("Quick Bar: ", qb, " | ID: ", qb.get_instance_id())
+		print("Quick Bar: ", qb, " | ID: ", qb.get_instance_id())
 
 	# profiles_panel only resolves once add_to_quick_bar() above has run
 	# the overlay's _ready(). Skipped if no backend was detected.
