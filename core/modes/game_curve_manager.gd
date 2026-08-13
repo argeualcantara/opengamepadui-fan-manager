@@ -118,7 +118,12 @@ var per_game_enabled: bool = false:
 				# start() already did is harmless on its own (see
 				# _snapshot()'s doc comment on curve points vs pwm_enable);
 				# only the recurring timer needs to stop.
-				for engine in mode_manager.get_all_curve_engines().values():
+				var engines := mode_manager.get_all_curve_engines()
+				logger.debug(
+					"per_game_enabled=false in mode '%s': stopping %d curve engine(s) to avoid polling outside custom mode"
+					% [mode_manager.current_mode, engines.size()]
+				)
+				for engine in engines.values():
 					engine.stop()
 			# apply_profile() updates the engines (and hardware) directly
 			# but never emits curve_applied — unlike _apply_context()/
@@ -379,8 +384,13 @@ func _on_curve_session_state_changed(state: CurveSessionState.State, context_key
 ## own top-level operation is fully settled. See store.enqueue()'s doc
 ## comment for why the read has to be lazy.
 func _on_curve_session_committed(context_key: String) -> void:
-	if not per_game_enabled or context_key.is_empty():
+	if not per_game_enabled:
+		logger.debug("_on_curve_session_committed('%s'): per_game_enabled is off, not staging a game_curves write" % context_key)
 		return
+	if context_key.is_empty():
+		logger.debug("_on_curve_session_committed(''): empty context_key, not staging a game_curves write")
+		return
+	logger.debug("_on_curve_session_committed('%s'): staging game_curves write" % context_key)
 	store.enqueue(func(): _snapshot(context_key))
 
 

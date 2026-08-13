@@ -146,6 +146,7 @@ func _on_mode_selected(index: int) -> void:
 	# that branching here. Matches the philosophy already documented for
 	# per-game contexts: mode changes are discrete, deliberate actions
 	# captured immediately, unlike a curve edit sitting on the sliders.
+	logger.debug("_on_mode_selected(%d): auto-committing via apply_current() (reason: mode changed to '%s')" % [index, mode_id])
 	profiles_panel.apply_current()
 
 	# Standalone, top-level operation (not part of a bigger
@@ -229,6 +230,7 @@ func _resync_fan_editors() -> void:
 ## signal (emitted at the end of every commit) is what tells
 ## GameCurveManager to snapshot the per-game context, if enabled.
 func _on_apply_pressed() -> void:
+	logger.debug("_on_apply_pressed(): committing via apply_current() (reason: user pressed Apply)")
 	profiles_panel.apply_current()
 
 

@@ -251,6 +251,12 @@ func _commit_save(profile_name: String) -> void:
 		if not store.save_profile(hardware_id, profile_name, profile_curves):
 			logger.error("Failed to save profile '%s'" % profile_name)
 			return
+		logger.debug("_commit_save('%s'): wrote profiles['%s'] for %d fan(s)" % [profile_name, profile_name, profile_curves.size()])
+	else:
+		logger.debug(
+			"_commit_save('%s'): per_game_enabled is on, skipping profiles[...] write (GameCurveManager owns game_curves)"
+			% profile_name
+		)
 
 	# Slider edits only touch the in-memory draft; this pushes it to
 	# hardware for every fan.
@@ -268,6 +274,7 @@ func _commit_save(profile_name: String) -> void:
 		_update_trigger()
 		_close_dropdown()
 		_close_new_name_form()
+	logger.info("_commit_save('%s'): committed draft curve to hardware for %d fan(s)" % [profile_name, curve_engines.size()])
 	# Emitted before flush() on purpose: GameCurveManager listens to
 	# this and enqueues a per-game snapshot job in response (see
 	# store.enqueue()'s doc comment) — flush() below is what actually
