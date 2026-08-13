@@ -21,6 +21,7 @@ class_name ModeSelectOverlay
 const FanModeManager = preload("res://plugins/fan-manager/core/modes/fan_mode_manager.gd")
 const ProfileManagerPanel = preload("res://plugins/fan-manager/core/ui/components/profile_manager_panel.gd")
 const GameCurveManager = preload("res://plugins/fan-manager/core/modes/game_curve_manager.gd")
+const CurveSessionState = preload("res://plugins/fan-manager/core/modes/curve_session_state.gd")
 const CustomCurveEditor = preload("res://plugins/fan-manager/core/ui/components/custom_curve_editor.gd")
 const FanTabButton = preload("res://plugins/fan-manager/core/ui/components/fan_tab_button.gd")
 
@@ -69,7 +70,6 @@ var _mode_ids: Array[String] = []
 ## the mode dropdown/toggle/apply signals and selects the current mode.
 func _ready() -> void:
 	error_label.visible = false
-	profiles_panel.dirty_changed.connect(_on_dirty_changed)
 
 	if not mode_manager or not mode_manager.backend:
 		logger.warn("No FanModeManager/backend available; showing empty state")
@@ -131,13 +131,32 @@ func _on_mode_selected(index: int) -> void:
 		_select_dropdown_for_mode(mode_manager.current_mode)
 		return
 
-	# This is a standalone, top-level operation (not part of a bigger
+	error_label.visible = false
+	# Must run before apply_current() below: it's what (re)populates
+	# profiles_panel.curve_engines from whatever engines set_mode() may
+	# have just created — calling apply_current() any earlier would hit
+	# its "no curve engines yet" guard on this session's very first
+	# bios -> custom switch.
+	_select_dropdown_for_mode(mode_id)
+
+	# Commits the mode change (tasks/18, etapa 4) through the same path
+	# the Apply button itself uses — ProfileManagerPanel._commit_save()
+	# already knows how to write game_curves[contexto] (per-game on) or
+	# profiles["Default"] (off), so this covers both without duplicating
+	# that branching here. Matches the philosophy already documented for
+	# per-game contexts: mode changes are discrete, deliberate actions
+	# captured immediately, unlike a curve edit sitting on the sliders.
+	profiles_panel.apply_current()
+
+	# Standalone, top-level operation (not part of a bigger
 	# restore-a-saved-context transaction) — flush right away. See
 	# GameCurveManager._apply_context() for the other case, which
 	# flushes itself once its own multi-step transaction is done.
+	# apply_current() above already flushes on its own successful path;
+	# this is a defensive fallback for its early-return branches (e.g.
+	# no curve engines yet), so the mode switch itself is never left
+	# unpersisted.
 	mode_manager.store.flush()
-	error_label.visible = false
-	_select_dropdown_for_mode(mode_id)
 
 
 ## Signal handler for FanModeManager.mode_changed.
@@ -146,9 +165,12 @@ func _on_mode_changed(mode: String) -> void:
 	_select_dropdown_for_mode(mode)
 
 
-## Signal handler for ProfileManagerPanel.dirty_changed.
-func _on_dirty_changed(is_dirty: bool) -> void:
-	dirty_badge.visible = is_dirty
+## Signal handler for GameCurveManager.curve_session.state_changed
+## (tasks/18, etapa 2): the badge now reflects the state machine
+## directly instead of ProfileManagerPanel's own (now removed) dirty
+## tracking.
+func _on_curve_session_state_changed(state: CurveSessionState.State, _context_key: String) -> void:
+	dirty_badge.visible = state == CurveSessionState.State.DIRTY
 
 
 ## Called by plugin.gd once GameCurveManager exists (needs
@@ -159,6 +181,7 @@ func bind_game_curve_manager(manager: GameCurveManager) -> void:
 	per_game_toggle.button_pressed = manager.per_game_enabled
 	per_game_toggle.toggled.connect(_on_per_game_toggled)
 	manager.curve_applied.connect(_on_curve_applied)
+	manager.curve_session.state_changed.connect(_on_curve_session_state_changed)
 
 
 ## Signal handler for the per-game Toggle.
@@ -177,10 +200,12 @@ func _on_per_game_toggled(pressed: bool) -> void:
 ## mode_changed): a context switch between two contexts that are both
 ## already in custom mode never fires mode_changed (see the no-op
 ## guard in FanModeManager.set_mode()), so _select_dropdown_for_mode()
-## below never runs either — without this, a dirty flag left over from
-## an unsaved edit in the *previous* context would keep showing the
-## "unsaved" badge even though the freshly-loaded curve for the new
-## context is exactly what's saved on disk.
+## below never runs either — without this, the profile picker's
+## rows/active marker would keep showing the previous context's state.
+## The "unsaved" badge itself no longer depends on this: it's driven by
+## curve_session.state_changed (tasks/18), and GameCurveManager's own
+## context_switched() call already clears DIRTY before this signal
+## fires.
 func _on_curve_applied() -> void:
 	if mode_manager.current_mode != "custom":
 		return

@@ -53,14 +53,13 @@ func test_trigger_starts_pending_when_no_profile_is_active() -> void:
 	assert_true(panel.trigger.pending)
 
 
-func test_saving_a_new_profile_adds_it_and_clears_dirty() -> void:
+func test_saving_a_new_profile_adds_it() -> void:
 	panel.name_input.text = "Silencioso"
 	panel._try_save()
 
 	assert_eq(panel._rows.size(), 1)
 	assert_eq(panel._rows[0].profile_name, "Silencioso")
 	assert_true(panel._rows[0].active)
-	assert_false(panel._dirty)
 	assert_false(panel.trigger.pending)
 	assert_eq(panel.trigger.profile_name, "Silencioso")
 
@@ -112,7 +111,6 @@ func test_selecting_a_profile_loads_it_into_the_engine() -> void:
 	panel.apply_profile("Perfil")
 
 	assert_eq(curve_engine.get_curve(), {10: 7.0, 20: 8.0, 30: 9.0})
-	assert_false(panel._dirty)
 	assert_true(panel._rows[0].active)
 	assert_eq(panel.trigger.profile_name, "Perfil")
 
@@ -156,25 +154,6 @@ func test_deleting_an_inactive_profile_does_not_touch_the_active_one() -> void:
 	assert_eq(panel._rows[0].profile_name, "Ativo")
 	assert_true(panel._rows[0].active)
 	assert_false(panel.trigger.pending)
-
-
-func test_editing_curve_marks_dirty_and_emits_signal() -> void:
-	watch_signals(panel)
-	curve_engine.set_point(10, 55.0)
-
-	assert_true(panel._dirty)
-	assert_signal_emitted(panel, "dirty_changed")
-
-
-func test_selecting_a_profile_after_editing_clears_dirty() -> void:
-	store.save_profile(_test_hardware_id, "Perfil", {_fan_id: {10: 7, 20: 8, 30: 9}})
-	panel.refresh(store, _test_hardware_id, curve_engines)
-
-	curve_engine.set_point(10, 55.0)
-	assert_true(panel._dirty)
-
-	panel.apply_profile("Perfil")
-	assert_false(panel._dirty)
 
 
 func test_applying_a_profile_emits_active_profile_changed() -> void:

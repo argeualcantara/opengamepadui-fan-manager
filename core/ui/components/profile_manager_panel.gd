@@ -15,8 +15,6 @@ const ProfileTriggerButton = preload("res://plugins/fan-manager/core/ui/componen
 const ProfileRow = preload("res://plugins/fan-manager/core/ui/components/profile_row.gd")
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
 
-signal dirty_changed(is_dirty: bool)
-
 ## Fires whenever the active profile marker changes: selecting,
 ## saving/overwriting, deleting the active one, or picking "New
 ## profile" (profile_name == "" in the last two cases). Used by
@@ -31,7 +29,9 @@ var store: FanCurveStore
 var hardware_id: String = ""
 
 ## fan_id -> CustomCurveEngine. A saved profile bundles one curve per
-## fan: save/apply/dirty-tracking all iterate every engine here.
+## fan: save/apply all iterate every engine here. Dirty-tracking used
+## to live here too; it's now owned by GameCurveManager's
+## CurveSessionState (tasks/18) instead.
 var curve_engines: Dictionary = {}
 
 @onready var trigger := $%Trigger as ProfileTriggerButton
@@ -52,7 +52,6 @@ var curve_engines: Dictionary = {}
 var _rows: Array[ProfileRow] = []
 var _active_profile: String = ""
 var _pending_save_name: String = ""
-var _dirty := false
 
 
 ## Wires all button/input signals and starts with dropdown/forms closed.
@@ -72,19 +71,11 @@ func _ready() -> void:
 
 
 ## Call whenever Custom Mode becomes active (or the hardware/engines
-## change): reloads the profile list/active marker from disk and
-## (re)connects dirty-state tracking to p_curve_engines.
+## change): reloads the profile list/active marker from disk.
 func refresh(p_store: FanCurveStore, p_hardware_id: String, p_curve_engines: Dictionary) -> void:
-	for engine in curve_engines.values():
-		if engine.curve_changed.is_connected(_on_engine_curve_changed):
-			engine.curve_changed.disconnect(_on_engine_curve_changed)
-
 	store = p_store
 	hardware_id = p_hardware_id
 	curve_engines = p_curve_engines
-
-	for engine in curve_engines.values():
-		engine.curve_changed.connect(_on_engine_curve_changed)
 
 	var data: Dictionary = store.load_data(hardware_id)
 	var raw_active = data.get("active_profile")
@@ -95,7 +86,6 @@ func refresh(p_store: FanCurveStore, p_hardware_id: String, p_curve_engines: Dic
 		profiles = {}
 	_rebuild_rows(profiles.keys())
 	_update_trigger()
-	_set_dirty(false)
 
 
 ## Rebuilds the dropdown's profile rows from names, marking the one
@@ -162,7 +152,6 @@ func apply_profile(profile_name: String) -> void:
 		row.active = row.profile_name == profile_name
 	_update_trigger()
 	_close_dropdown()
-	_set_dirty(false)
 	active_profile_changed.emit(profile_name)
 
 
@@ -193,11 +182,6 @@ func _on_row_delete_requested(profile_name: String) -> void:
 	if profiles == null:
 		profiles = {}
 	_rebuild_rows(profiles.keys())
-
-
-## Signal handler for CustomCurveEngine.curve_changed.
-func _on_engine_curve_changed(_curve: Dictionary) -> void:
-	_set_dirty(true)
 
 
 ## With an active profile, saves straight to it (no prompt). With none
@@ -284,7 +268,6 @@ func _commit_save(profile_name: String) -> void:
 		_update_trigger()
 		_close_dropdown()
 		_close_new_name_form()
-	_set_dirty(false)
 	# Emitted before flush() on purpose: GameCurveManager listens to
 	# this and enqueues a per-game snapshot job in response (see
 	# store.enqueue()'s doc comment) — flush() below is what actually
@@ -310,11 +293,3 @@ func apply_current() -> void:
 func _persist_active_profile(profile_name: String) -> void:
 	store.load_data(hardware_id)
 	store.set_active_profile(profile_name)
-
-
-## Updates _dirty and emits dirty_changed, but only on an actual change.
-func _set_dirty(value: bool) -> void:
-	if _dirty == value:
-		return
-	_dirty = value
-	dirty_changed.emit(_dirty)
