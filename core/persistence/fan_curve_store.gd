@@ -154,6 +154,8 @@ func set_active_profile(profile_name) -> void:
 func set_per_game_enabled(value: bool) -> void:
 	_data["per_game_enabled"] = value
 
+func get_per_game_enabled() -> bool:
+	return _data.get("per_game_enabled", false)
 
 func set_active_game_context(context_key: String) -> void:
 	_data["active_game_context"] = context_key

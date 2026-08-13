@@ -262,9 +262,11 @@ func _commit_save(profile_name: String) -> void:
 	for fan_id in curve_engines:
 		profile_curves[fan_id] = curve_engines[fan_id].get_curve()
 
-	if not store.save_profile(hardware_id, profile_name, profile_curves):
-		logger.error("Failed to save profile '%s'" % profile_name)
-		return
+	var is_per_game_enabled: bool = store.get_per_game_enabled()
+	if not is_per_game_enabled:
+		if not store.save_profile(hardware_id, profile_name, profile_curves):
+			logger.error("Failed to save profile '%s'" % profile_name)
+			return
 
 	# Slider edits only touch the in-memory draft; this pushes it to
 	# hardware for every fan.
@@ -273,15 +275,15 @@ func _commit_save(profile_name: String) -> void:
 
 	_active_profile = profile_name
 	_persist_active_profile(profile_name)
-
-	var data: Dictionary = store.load_data(hardware_id)
-	var profiles: Dictionary = data.get("profiles")
-	if profiles == null:
-		profiles = {}
-	_rebuild_rows(profiles.keys())
-	_update_trigger()
-	_close_dropdown()
-	_close_new_name_form()
+	if not is_per_game_enabled:
+		var data: Dictionary = store.load_data(hardware_id)
+		var profiles: Dictionary = data.get("profiles")
+		if profiles == null:
+			profiles = {}
+		_rebuild_rows(profiles.keys())
+		_update_trigger()
+		_close_dropdown()
+		_close_new_name_form()
 	_set_dirty(false)
 	# Emitted before flush() on purpose: GameCurveManager listens to
 	# this and enqueues a per-game snapshot job in response (see

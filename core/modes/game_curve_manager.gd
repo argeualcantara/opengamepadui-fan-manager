@@ -22,6 +22,7 @@ class_name GameCurveManager
 const FanCurveStore = preload("res://plugins/fan-manager/core/persistence/fan_curve_store.gd")
 const FanModeManager = preload("res://plugins/fan-manager/core/modes/fan_mode_manager.gd")
 const ProfileManagerPanel = preload("res://plugins/fan-manager/core/ui/components/profile_manager_panel.gd")
+const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
 
 const STEAM_HOME_KEY := "__steam_home__"
 
@@ -58,6 +59,19 @@ var per_game_enabled: bool = false:
 		_persist_enabled(value)
 		if value:
 			_apply_or_track(launch_manager.get_current_app())
+		elif mode_manager.current_mode == "custom":
+			# Turning tracking off otherwise leaves whichever context's
+			# curve was last active sitting in the engines/on hardware
+			# with no indication anything changed. Snap back to the
+			# single shared "Default" profile — the same curve Apply
+			# now writes to while per-game is off (see
+			# ProfileManagerPanel._commit_save()) — so the UI and
+			# hardware match what'll actually get edited/saved from
+			# here on. profiles["Default"] has no mode of its own (only
+			# a per-fan curve), so this only makes sense while already
+			# in custom mode; no-op (with a log warning) if "Default"
+			# doesn't exist yet.
+			profiles_panel.apply_profile(FanCurveUtils.DEFAULT_PROFILE_NAME)
 
 
 ## Wires dependencies in: launch_manager (game switch events, and

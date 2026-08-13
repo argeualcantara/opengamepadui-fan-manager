@@ -172,10 +172,20 @@ func _on_per_game_toggled(pressed: bool) -> void:
 ## wouldn't otherwise pick up a per-context curve switch (see
 ## curve_applied's doc comment). Re-binding forces each editor to
 ## re-pull and redraw the engine's current curve.
+##
+## Also re-runs ProfileManagerPanel.refresh() here (not just on a real
+## mode_changed): a context switch between two contexts that are both
+## already in custom mode never fires mode_changed (see the no-op
+## guard in FanModeManager.set_mode()), so _select_dropdown_for_mode()
+## below never runs either — without this, a dirty flag left over from
+## an unsaved edit in the *previous* context would keep showing the
+## "unsaved" badge even though the freshly-loaded curve for the new
+## context is exactly what's saved on disk.
 func _on_curve_applied() -> void:
 	if mode_manager.current_mode != "custom":
 		return
 	_resync_fan_editors()
+	profiles_panel.refresh(mode_manager.store, mode_manager.hardware_id, mode_manager.get_all_curve_engines())
 
 
 ## Re-pulls each built CustomCurveEditor's displayed curve from its
