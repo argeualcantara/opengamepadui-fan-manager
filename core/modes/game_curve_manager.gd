@@ -77,9 +77,9 @@ var per_game_enabled: bool = false:
 			if mode_manager.current_mode != "custom":
 				logger.debug(
 					"per_game_enabled=false in mode '%s': stopping %d curve engine(s) to avoid polling outside custom mode"
-					% [mode_manager.current_mode, engines.size()]
+					% [mode_manager.current_mode, mode_manager.curve_engines.size()]
 				)
-				for engine in engines.values():
+				for engine in mode_manager.curve_engines.values():
 					engine.stop()
 			curve_applied.emit()
 			curve_session.per_game_toggled_off()
