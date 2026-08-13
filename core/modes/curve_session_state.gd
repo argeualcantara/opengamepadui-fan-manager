@@ -3,20 +3,20 @@ class_name CurveSessionState
 
 ## Tracks, for the active game context, whether the curve currently
 ## loaded into the (shared, per-fan) CustomCurveEngine instances is
-## clean, edited, or committed — the one thing that was previously
+## clean, edited, or committed, the one thing that was previously
 ## inferred implicitly from signal ordering across GameCurveManager,
 ## FanModeManager, ProfileManagerPanel, and ModeSelectOverlay (see
 ## tasks/18-state-machine-curva-por-etapas.md for the bugs that came
 ## from that).
 ##
 ## Pure state only: no I/O, no engines/store access. Every transition
-## below just updates state/context_key and emits state_changed —
+## below just updates state/context_key and emits state_changed,
 ## callers are the ones responsible for the actual side effects
 ## (load_curve(), writing game_curves/profiles, updating the dirty
 ## badge). state_changed fires on every transition call, even if the
 ## resulting State value is textually the same as before (e.g.
 ## apply_pressed() while already COMMITTED): each call represents a
-## real event that happened, not just a memoized value — collapsing
+## real event that happened, not just a memoized value, collapsing
 ## "did the enum value change" into "did the event happen" was itself
 ## the cause of at least one bug fixed this session (the dirty badge
 ## not resetting).
@@ -39,7 +39,7 @@ const DEFAULT_PROFILE_CONTEXT_KEY := "__default__"
 ## can end up as two distinct type identities for the compiler, which
 ## fails the whole plugin to compile with "Cannot assign a value of
 ## type CurveSessionState.State to variable "state" with specified
-## type State" — confirmed on real hardware (tasks/18). Untyped avoids
+## type State", confirmed on real hardware (tasks/18). Untyped avoids
 ## the cross-script identity check entirely; enums are just ints at
 ## runtime, so this costs only compile-time checking within this file.
 signal state_changed(state, context_key: String)
@@ -51,8 +51,8 @@ var context_key: String = ""
 
 
 ## A context became active (a game switch, Steam Home, or per-game
-## tracking just turned on): whatever was loaded before — including an
-## unsaved DIRTY edit — is irrelevant now, since the engines are about
+## tracking just turned on): whatever was loaded before, including an
+## unsaved DIRTY edit, is irrelevant now, since the engines are about
 ## to be reloaded with new_context_key's own curve.
 func context_switched(new_context_key: String) -> void:
 	state = State.LOADED
@@ -84,7 +84,7 @@ func slider_edited() -> void:
 ## Apply was pressed: commits whatever's currently loaded, regardless
 ## of whether it was actually edited (mirrors ModeSelectOverlay's
 ## Apply button, which has no dirty guard today). No-op while
-## UNTRACKED — there's no context to commit to.
+## UNTRACKED, there's no context to commit to.
 func apply_pressed() -> void:
 	if state == State.UNTRACKED:
 		return
@@ -94,7 +94,7 @@ func apply_pressed() -> void:
 
 
 ## Per-game tracking just turned off: snaps to the single shared
-## "Default" profile regardless of prior state/context — there's no
+## "Default" profile regardless of prior state/context, there's no
 ## per-context curve to track anymore.
 func per_game_toggled_off() -> void:
 	state = State.LOADED
