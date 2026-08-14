@@ -148,9 +148,13 @@ func read_fan_percent(fan_id: String) -> float:
 
 
 ## Discovers hwmon devices exposing at least a matched pwm1/temp1_input
-## pair (see _resolve_fan_channels() for the multi-fan split). Cached
-## once found; retried until then (hwmon may not be populated yet this
-## early in boot).
+## pair (see _resolve_fan_channels() for the multi-fan split), where
+## both pwm<N>_enable and pwm<N> are actually writable (see
+## _writable_channels()) — a channel that merely exists but can't be
+## written to isn't controllable, and reporting it as supported would
+## only surface as a failure later, at set_mode()/apply_custom_curve()
+## time. Cached once found; retried until then (hwmon may not be
+## populated yet this early in boot).
 func _get_or_discover_fans() -> Array[String]:
 	if not _discovered_fans.is_empty():
 		return _discovered_fans
@@ -178,24 +182,48 @@ func _get_or_discover_fans() -> Array[String]:
 			)
 
 			var channels := _resolve_fan_channels(pwm_channels, temp_channels)
+			var writable_channels := _writable_channels(device_path, channels)
 			logger.debug(
-				"%s: pwm_channels=%s temp_channels=%s -> resolved=%s"
-				% [device_path, pwm_channels, temp_channels, channels]
+				"%s: pwm_channels=%s temp_channels=%s -> resolved=%s -> writable=%s"
+				% [device_path, pwm_channels, temp_channels, channels, writable_channels]
 			)
-			if channels.size() > 1:
-				for channel in channels:
+			if writable_channels.size() > 1:
+				for channel in writable_channels:
 					discovered.append("%s#%d" % [device_path, channel])
-			elif channels.size() == 1:
-				discovered.append(device_path)
+			elif writable_channels.size() == 1:
+				var channel: int = writable_channels[0]
+				if channel == 1:
+					discovered.append(device_path)
+				else:
+					discovered.append("%s#%d" % [device_path, channel])
 		entry = dir.get_next()
 	dir.list_dir_end()
 
 	logger.info("Scanned %s: %s" % [HWMON_DIR, ", ".join(seen)])
 	if discovered.is_empty():
-		logger.warn("No hwmon device exposing a matched pwm<N>/temp<N>_input pair found")
+		logger.warn("No writable hwmon pwm<N>/pwm<N>_enable pair found")
 
 	_discovered_fans = discovered
 	return _discovered_fans
+
+
+## Filters channels down to those where both pwm<N>_enable (mode
+## switch) and pwm<N> (fan speed) can actually be opened for writing —
+## a channel that exists but is read-only (fixed by firmware, wrong
+## udev permissions, etc) isn't something this backend can control.
+func _writable_channels(device_path: String, channels: Array[int]) -> Array[int]:
+	var writable: Array[int] = []
+	for channel in channels:
+		var enable_path := "%s/pwm%d_enable" % [device_path, channel]
+		var speed_path := "%s/pwm%d" % [device_path, channel]
+		if not PwmIo.is_writable(enable_path):
+			logger.debug("%s: pwm%d_enable not writable, dropping channel" % [device_path, channel])
+			continue
+		if not PwmIo.is_writable(speed_path):
+			logger.debug("%s: pwm%d not writable, dropping channel" % [device_path, channel])
+			continue
+		writable.append(channel)
+	return writable
 
 
 ## Returns channel numbers (1..MAX_FAN_CHANNELS) for which

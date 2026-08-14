@@ -66,3 +66,18 @@ static func write_text(path: String, text: String) -> bool:
 	file.store_string(text)
 	logger.debug("write_text('%s', '%s') succeeded" % [path, text])
 	return true
+
+
+## Probes whether path can currently be opened for writing, without
+## writing any content to it (used by backends to confirm a sysfs
+## attribute is actually controllable before reporting a fan/channel
+## as supported, not just present).
+static func is_writable(path: String) -> bool:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if not file:
+		logger.debug(
+			"is_writable('%s') -> false: %s" % [path, error_string(FileAccess.get_open_error())]
+		)
+		return false
+	file.close()
+	return true
