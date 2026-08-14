@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Installs to /usr/share/polkit-1/actions/. Pairs with the
+  fan-manager-priv-write helper in this same directory,  see that
+  script's header comment for why the helper itself, not this policy
+  file, is what actually keeps this safe (this file only controls WHO
+  may invoke the helper, not what the helper is allowed to do once
+  invoked).
+
+  allow_active=yes: no password prompt for the active local graphical
+  session. Fan curve writes happen continuously while polling
+  (CustomCurveEngine's poll timer), not as a one-off user action, so
+  prompting per-write isn't viable,  same trust model already used by
+  this device family for TDP/GPU clock controls (frequent writes,
+  local physically-present user, no remote/multi-user scenario to
+  protect against).
+-->
+<policyconfig>
+  <action id="io.github.argeualcantara.fan-manager.write-pwm">
+    <description>Write a fan control value to a whitelisted hwmon attribute</description>
+    <message>Authentication is required to change fan control settings</message>
+    <icon_name>fan-manager</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/fan-manager-priv-write</annotate>
+  </action>
+</policyconfig>
