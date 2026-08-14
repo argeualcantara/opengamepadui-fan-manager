@@ -160,7 +160,7 @@ func read_fan_percent(fan_id: String) -> float:
 ## Discovers hwmon devices exposing at least a matched pwm1/temp1_input
 ## pair (see _resolve_fan_channels() for the multi-fan split), where
 ## both pwm<N>_enable and pwm<N> are actually writable (see
-## _writable_channels()) — a channel that merely exists but can't be
+## _writable_channels()),  a channel that merely exists but can't be
 ## written to isn't controllable, and reporting it as supported would
 ## only surface as a failure later, at set_mode()/apply_custom_curve()
 ## time. Cached once found; retried until then (hwmon may not be

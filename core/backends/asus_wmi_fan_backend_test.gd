@@ -93,6 +93,6 @@ func test_get_fan_label_falls_back_to_generic_name_for_an_undiscovered_fan_id() 
 	# actually discovered (no real hwmon device on the test machine)
 	# has no channel to read a per-channel label/number from, so it
 	# falls back to the same generic "Fan" FanBackend itself defaults
-	# to — not "Fan 1"/"Fan 2", since there's no channel to number.
+	# to,  not "Fan 1"/"Fan 2", since there's no channel to number.
 	assert_eq(backend.get_fan_label("/sys/class/hwmon/hwmon8#1"), "Fan")
 	assert_eq(backend.get_fan_label("/sys/class/hwmon/hwmon8#2"), "Fan")

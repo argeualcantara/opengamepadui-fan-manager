@@ -18,7 +18,7 @@ static var logger := Log.get_logger("FanManager PwmIo")
 ## ...}. A bare device path with no "#" defaults to channel 1, for
 ## single-fan hardware's fan_id (backward compatible with saved
 ## profiles).
-## TODO: no longer called anywhere — HwmonFanBackend and
+## TODO: no longer called anywhere,  HwmonFanBackend and
 ## AsusWmiFanBackend both migrated to looking up a PwmChannel (with
 ## every path already resolved) by fan_id instead of re-deriving paths
 ## from it on every call. Safe to delete this method and its two tests
@@ -73,7 +73,7 @@ static func write_text(path: String, text: String) -> bool:
 	return true
 
 
-## Returns whether path exists at all, without opening it — cheaper
+## Returns whether path exists at all, without opening it,  cheaper
 ## than is_writable() for callers that only need to know a sysfs
 ## attribute is present (e.g. probing how many hardware curve points a
 ## device actually exposes), not that it's writable.

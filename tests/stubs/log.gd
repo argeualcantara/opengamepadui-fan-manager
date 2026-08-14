@@ -5,7 +5,7 @@ class_name Log
 ## enough for this repo's own scripts (which only ever call
 ## Log.get_logger(name) and then .debug()/.info()/.warn()/.error() on
 ## the result) to run standalone here, without pulling in OGUI's real
-## CustomLogger/LogManager machinery. Not a copy of OGUI's Log — this
+## CustomLogger/LogManager machinery. Not a copy of OGUI's Log,  this
 ## repo has no autoload/global-class dependency on OGUI beyond this
 ## one call shape, so a tiny stub covers it fully.
 

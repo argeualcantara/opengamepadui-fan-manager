@@ -62,7 +62,7 @@ func test_resample_to_fixed_points_interpolates_correctly() -> void:
 func test_resample_to_fixed_points_is_stable_on_already_aligned_curves() -> void:
 	# interpolate_value() (which resample_to_fixed_points() calls for
 	# every point) always returns float, so curve's values must be
-	# float too for this dict-equality check to hold — a curve with
+	# float too for this dict-equality check to hold,  a curve with
 	# int values would numerically match but fail Dictionary equality
 	# on type alone.
 	var curve := {

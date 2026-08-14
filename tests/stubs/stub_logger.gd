@@ -3,7 +3,7 @@ class_name StubLogger
 
 ## Backs Log.get_logger() in this standalone test harness. Just prints
 ## to stdout with a level/name prefix instead of routing through
-## OGUI's real logging infrastructure — plenty for making test output
+## OGUI's real logging infrastructure,  plenty for making test output
 ## readable, nothing here is asserted on.
 
 var name: String

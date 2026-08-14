@@ -2,7 +2,7 @@ extends RefCounted
 class_name PwmChannel
 
 ## A single controllable fan channel, with every sysfs path it needs
-## already resolved once at discovery time — callers (backend instance
+## already resolved once at discovery time,  callers (backend instance
 ## methods) look this up by fan_id and use its fields directly,
 ## instead of re-parsing fan_id and rebuilding "%s/pwm%d..." paths on
 ## every call (the old PwmIo.split_channel_fan_id()-based pattern).
@@ -19,7 +19,10 @@ class_name PwmChannel
 ## polls and interpolates in software); AsusWmiFanBackend uses up to
 ## 8 (the full hardware curve table).
 
-## External, persisted identity — same string shape saved.gd's
+const PwmCurvePath = preload("res://plugins/fan-manager/core/models/pwm_curve_path.gd")
+
+
+## External, persisted identity,  same string shape saved.gd's
 ## game_curves/profiles dictionaries already use as keys today.
 var fan_id: String = ""
 

@@ -2,7 +2,7 @@ name: Test
 
 # Runs the standalone GUT harness under tests/ (see tests/project.godot's
 # header comment for what it is and why it exists) against every push/PR.
-# Godot itself and the GUT addon are never committed to this repo — both
+# Godot itself and the GUT addon are never committed to this repo,  both
 # are pinned exact versions, downloaded fresh each run, so there's nothing
 # here to keep in sync by hand.
 
