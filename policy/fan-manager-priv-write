@@ -1,30 +1,53 @@
 #!/bin/bash
-# fan-manager-priv-write <path> <value>
+# fan-manager-priv-write <systemd-escape(path)>@<systemd-escape(value)>
 #
-# Privileged helper, meant to be invoked only via pkexec under the
-# io.github.argeualcantara.fan-manager.write-pwm polkit action (see
-# the .policy file in this same directory). Writes value to path, 
-# but only if path canonicalizes to one of this plugin's own fan
-# control attributes, and value passes a strict per-attribute check.
+# Privileged helper, run as root via the fan-manager-priv-write@.service
+# systemd template unit (see that file in this same directory), started
+# with `systemctl start fan-manager-priv-write@<instance>.service` and
+# authorized without a password by the polkit rule in
+# 50-fan-manager.rules — which matches on
+# org.freedesktop.systemd1.manage-units plus this exact unit-name
+# prefix, not on this script's own path. That's deliberate: an earlier
+# version of this helper was invoked directly via pkexec, but pkexec's
+# org.freedesktop.policykit.exec.path annotation matches against the
+# binary actually execve()'d, which for a "#!/bin/bash" script is the
+# interpreter (/bin/bash), not the script — so the custom action never
+# matched and pkexec silently fell back to requiring a password every
+# time. Going through systemd instead sidesteps that: the polkit check
+# happens on the unit name, so this can stay a plain script.
 #
-# This exists so PwmIo (the Godot plugin, running unprivileged) never
-# needs write access to /sys/class/hwmon itself: it shells out to this
-# helper instead. Everything below exists to make sure that doesn't
-# become "run anything as root",  a generic passthrough here would be
-# a local privilege-escalation vector, not a fan controller. Keep the
-# whitelist and value checks exactly as strict as what's actually
-# needed by AsusWmiFanBackend/HwmonFanBackend (core/backends/*.gd):
-# pwm<N>_enable, bare pwm<N>, and pwm<N>_auto_point<I>_temp/_pwm.
+# The instance argument packs both path and value (systemd unit
+# instances are a single string) as
+# "<systemd-escape(path)>@<systemd-escape(value)>" — "@" is never
+# produced by systemd-escape's own output, so it's a safe separator.
+# Writes value to path, but only if path canonicalizes to one of this
+# plugin's own fan control attributes, and value passes a strict
+# per-attribute check. Everything below exists to make sure that
+# doesn't become "run anything as root",  a generic passthrough here
+# would be a local privilege-escalation vector, not a fan controller.
+# Keep the whitelist and value checks exactly as strict as what's
+# actually needed by AsusWmiFanBackend/HwmonFanBackend
+# (core/backends/*.gd): pwm<N>_enable, bare pwm<N>, and
+# pwm<N>_auto_point<I>_temp/_pwm.
 
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-    echo "usage: fan-manager-priv-write <path> <value>" >&2
+if [[ $# -ne 1 ]]; then
+    echo "usage: fan-manager-priv-write <systemd-escape(path)>@<systemd-escape(value)>" >&2
     exit 1
 fi
 
-requested_path="$1"
-value="$2"
+instance="$1"
+encoded_path="${instance%%@*}"
+encoded_value="${instance#*@}"
+
+if [[ "$encoded_path" == "$instance" ]]; then
+    echo "malformed instance, missing '@' separator: $instance" >&2
+    exit 1
+fi
+
+requested_path="$(systemd-escape -u -- "$encoded_path")"
+value="$(systemd-escape -u -- "$encoded_value")"
 
 # realpath -e fails (and refuses) if the path doesn't exist yet, which
 # is exactly right here: every attribute this helper ever writes to
