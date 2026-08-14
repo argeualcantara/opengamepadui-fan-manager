@@ -14,22 +14,6 @@ static var dry_run := true
 static var logger := Log.get_logger("FanManager PwmIo")
 
 
-## Splits a "<device>#<channel>" fan_id into {"device": ..., "channel":
-## ...}. A bare device path with no "#" defaults to channel 1, for
-## single-fan hardware's fan_id (backward compatible with saved
-## profiles).
-## TODO: no longer called anywhere,  HwmonFanBackend and
-## AsusWmiFanBackend both migrated to looking up a PwmChannel (with
-## every path already resolved) by fan_id instead of re-deriving paths
-## from it on every call. Safe to delete this method and its two tests
-## in pwm_io_test.gd once nothing else needs it.
-static func split_channel_fan_id(fan_id: String) -> Dictionary:
-	var parts := fan_id.split("#")
-	if parts.size() != 2:
-		return {"device": fan_id, "channel": 1}
-	return {"device": parts[0], "channel": int(parts[1])}
-
-
 ## Converts a 0-100% fan speed to a 0-255 pwm duty-cycle value.
 static func percent_to_pwm(percent: float) -> int:
 	return clampi(roundi(clampf(percent, 0.0, 100.0) / 100.0 * 255.0), 0, 255)
@@ -57,19 +41,64 @@ static func read_text(path: String) -> String:
 	return as_text
 
 
-## Writes text to a sysfs file. Returns false if it couldn't be opened
-## for writing (permission denied, missing udev rule, device gone).
+## Writes text to a sysfs file. Tries a direct write first (works if
+## this process already has permission, e.g. a future udev rule); on
+## failure, falls back to the privileged helper (see
+## policy/fan-manager-priv-write@.service and policy/50-fan-manager.rules)
+## before giving up — the expected path in production, since these
+## sysfs attributes are root-owned and this plugin runs unprivileged.
 static func write_text(path: String, text: String) -> bool:
 	if dry_run:
 		logger.info("[DRY RUN] would write '%s' to %s" % [text, path])
 		return true
 
 	var file := FileAccess.open(path, FileAccess.WRITE)
-	if not file:
-		logger.debug("write_text('%s') failed to open: %s" % [path, error_string(FileAccess.get_open_error())])
+	if file:
+		file.store_string(text)
+		logger.debug("write_text('%s', '%s') succeeded" % [path, text])
+		return true
+
+	logger.debug(
+		"write_text('%s') failed to open directly (%s), falling back to privileged helper"
+		% [path, error_string(FileAccess.get_open_error())]
+	)
+	return _privileged_write(path, text)
+
+
+## Unit template installed by policy/fan-manager-priv-write@.service;
+## the instance packs "<systemd-escape(path)>@<systemd-escape(value)>"
+## (see that file's own header comment for the exact format and why
+## it exists instead of a plain pkexec call).
+const PRIV_WRITE_UNIT_TEMPLATE := "fan-manager-priv-write@%s.service"
+
+
+static func _escape_for_systemd(value: String) -> String:
+	var output := []
+	var exit_code := OS.execute("systemd-escape", ["--", value], output)
+	if exit_code != 0:
+		logger.debug("_escape_for_systemd('%s') failed: systemd-escape exited %d" % [value, exit_code])
+		return ""
+	return (output[0] as String).strip_edges()
+
+
+## Starts fan-manager-priv-write@<instance>.service (authorized
+## without a password by policy/50-fan-manager.rules) to perform the
+## write as root. Returns false without spawning systemctl at all if
+## the instance can't be built, so this degrades cleanly rather than
+## running a command that can't possibly succeed.
+static func _privileged_write(path: String, text: String) -> bool:
+	var escaped_path := _escape_for_systemd(path)
+	var escaped_value := _escape_for_systemd(text)
+	if escaped_path.is_empty() or escaped_value.is_empty():
 		return false
-	file.store_string(text)
-	logger.debug("write_text('%s', '%s') succeeded" % [path, text])
+
+	var unit := PRIV_WRITE_UNIT_TEMPLATE % (escaped_path + "@" + escaped_value)
+	var output := []
+	var exit_code := OS.execute("systemctl", ["start", unit], output, true)
+	if exit_code != 0:
+		logger.debug("_privileged_write('%s', '%s') failed via %s: %s" % [path, text, unit, output])
+		return false
+	logger.debug("_privileged_write('%s', '%s') succeeded via %s" % [path, text, unit])
 	return true
 
 
