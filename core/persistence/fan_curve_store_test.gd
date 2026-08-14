@@ -137,12 +137,17 @@ func test_sanitize_id_strips_unsafe_filename_characters() -> void:
 	var path := store._path_for(hardware_id)
 
 	assert_false(path.contains(" "))
-	assert_false(path.contains("/Weird"))
+	assert_true(path.contains("Weird"))
+	assert_true(path.contains("Product_Name"))
 	assert_false(path.contains("!"))
 	assert_false(path.contains("*"))
 
+func test_sanitize_id_replaces_invalid_characters() -> void:
+	var hardware_id := _track("???")
+	var path := store._path_for(hardware_id)
+	assert_eq(path, "user://data/fan-manager/___.json")
 
 func test_sanitize_id_never_produces_empty_filename() -> void:
-	var hardware_id := _track("???")
+	var hardware_id := _track("")
 	var path := store._path_for(hardware_id)
 	assert_eq(path, "user://data/fan-manager/unknown.json")

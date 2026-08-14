@@ -78,16 +78,21 @@ func test_validate_and_clamp_accepts_string_keys_from_json() -> void:
 	assert_false(validated.has("10"))
 
 
-# split_channel_fan_id() itself now lives on PwmIo (shared with
-# HwmonFanBackend's own multi-fan discovery): see pwm_io_test.gd for
-# its coverage. Nothing left here to test that's specific to this
-# backend's use of it.
+# PwmIo.split_channel_fan_id() is no longer called by this backend
+# (or HwmonFanBackend): both migrated to looking up a PwmChannel by
+# fan_id instead (see _build_channel()/_get_channel()). It's still
+# defined on PwmIo, marked TODO for removal there, with its own
+# coverage still in pwm_io_test.gd. Nothing left here to test that's
+# specific to this backend's use of it.
 
 
-func test_get_fan_label_falls_back_to_generic_name_when_unreadable() -> void:
-	# No real hwmon device on the test machine, so fan<N>_label is
-	# unreadable both on the fan's own device and across every other
-	# hwmon device scanned by _find_fan_label_across_hwmon(): exercises
-	# the full fallback path without crashing.
-	assert_eq(backend.get_fan_label("/sys/class/hwmon/hwmon8#1"), "Fan 1")
-	assert_eq(backend.get_fan_label("/sys/class/hwmon/hwmon8#2"), "Fan 2")
+func test_get_fan_label_falls_back_to_generic_name_for_an_undiscovered_fan_id() -> void:
+	# get_fan_label() now looks up a PwmChannel by fan_id instead of
+	# re-deriving the channel number from the string (see
+	# _build_channel()/_get_channel()): a fan_id that was never
+	# actually discovered (no real hwmon device on the test machine)
+	# has no channel to read a per-channel label/number from, so it
+	# falls back to the same generic "Fan" FanBackend itself defaults
+	# to — not "Fan 1"/"Fan 2", since there's no channel to number.
+	assert_eq(backend.get_fan_label("/sys/class/hwmon/hwmon8#1"), "Fan")
+	assert_eq(backend.get_fan_label("/sys/class/hwmon/hwmon8#2"), "Fan")

@@ -8,7 +8,7 @@ class_name FanBackendRegistry
 ## Referenced via preload()'d consts, not bare class_name lookups: see
 ## hwmon_fan_backend.gd's header comment for why.
 const FanBackend = preload("res://plugins/fan-manager/core/backends/fan_backend.gd")
-const HardwareId = preload("res://plugins/fan-manager/core/backends/hardware_id.gd")
+const HardwareId = preload("res://plugins/fan-manager/core/utils/hardware_id.gd")
 
 var logger := Log.get_logger("FanManager FanBackendRegistry")
 

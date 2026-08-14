@@ -1,7 +1,7 @@
 extends RefCounted
 class_name HardwareId
 
-const PwmIo = preload("res://plugins/fan-manager/core/backends/pwm_io.gd")
+const PwmIo = preload("res://plugins/fan-manager/core/utils/pwm_io.gd")
 
 ## Shared hardware identification helper: ensures every FanBackend
 ## produces the same hardware_id for the same physical machine.

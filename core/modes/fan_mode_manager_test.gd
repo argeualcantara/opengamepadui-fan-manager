@@ -94,7 +94,7 @@ func test_startup_adopts_whatever_mode_the_hardware_reports() -> void:
 	var custom_backend := MockBackend.new()
 	custom_backend.hardware_id_value = "gut-fanmode-adopt-custom"
 	custom_backend.current_mode_value = "custom"
-	custom_backend.bios_curve = {10: 1, 20: 2, 30: 3, 40: 4, 50: 5, 60: 6, 70: 7, 80: 8, 90: 9, 100: 10}
+	custom_backend.bios_curve = {10: 1.0, 20: 2.0, 30: 3.0, 40: 4.0, 50: 5.0, 60: 6.0, 70: 7.0, 80: 8.0, 90: 9.0, 100: 10.0}
 
 	var custom_registry := FanBackendRegistry.new()
 	custom_registry.register(custom_backend)
@@ -175,7 +175,7 @@ func test_custom_mode_creates_default_profile_when_none_saved() -> void:
 
 
 func test_custom_mode_reuses_existing_default_profile_instead_of_recreating_it() -> void:
-	var custom_default := {10: 1, 20: 2, 30: 3, 40: 4, 50: 5, 60: 6, 70: 7, 80: 8, 90: 9, 100: 10}
+	var custom_default := {10: 1.0, 20: 2.0, 30: 3.0, 40: 4.0, 50: 5.0, 60: 6.0, 70: 7.0, 80: 8.0, 90: 9.0, 100: 10.0}
 	store.save_profile(
 		_test_hardware_id, FanCurveUtils.DEFAULT_PROFILE_NAME, {"mock-fan-0": custom_default}
 	)
@@ -188,7 +188,7 @@ func test_custom_mode_reuses_existing_default_profile_instead_of_recreating_it()
 
 
 func test_custom_mode_loads_active_profile_when_one_is_saved() -> void:
-	var profile_curve := {10: 5, 20: 15, 100: 90}
+	var profile_curve := {10: 5.0, 20: 15.0, 100: 90.0}
 	store.save_profile(_test_hardware_id, "Perfil", {"mock-fan-0": profile_curve})
 	var data := store.load_data(_test_hardware_id)
 	data["active_profile"] = "Perfil"

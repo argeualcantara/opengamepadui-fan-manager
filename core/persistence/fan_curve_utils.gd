@@ -79,7 +79,7 @@ static func interpolate_value(curve: Dictionary, temperature: float) -> float:
 			if span <= 0.0:
 				return lower_percent
 			var t := (temperature - lower_temp) / span
-			var result := lerp(lower_percent, upper_percent, t)
+			var result: float = lerp(lower_percent, upper_percent, t)
 			logger.debug(
 				"interpolate_value(%.1f°C): between %d°C(%.1f%%) and %d°C(%.1f%%) -> %.1f%%"
 				% [temperature, lower_temp, lower_percent, upper_temp, upper_percent, result]

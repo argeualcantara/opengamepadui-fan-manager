@@ -12,11 +12,8 @@ class_name FanBackend
 ## (mode switching, curve application, fan discovery) differs enough
 ## between backends that it's left for each subclass to implement.
 
-## Referenced via preload()'d consts, not bare class_name lookups:
-## OGUI loads plugins from a zip, so the global class_name cache is
-## never populated.
-const HardwareId = preload("res://plugins/fan-manager/core/backends/hardware_id.gd")
-const PwmIo = preload("res://plugins/fan-manager/core/backends/pwm_io.gd")
+const HardwareId = preload("res://plugins/fan-manager/core/utils/hardware_id.gd")
+const PwmIo = preload("res://plugins/fan-manager/core/utils/pwm_io.gd")
 
 var logger := Log.get_logger("FanManager FanBackend")
 
@@ -99,8 +96,7 @@ func requires_software_polling() -> bool:
 
 ## Discovers and returns the ids of controllable fans on this hardware.
 ## Every backend has a different discovery strategy, so this must be
-## overridden per-backend. Implementations are expected to cache their
-## result (is_supported() and list_fans() above call it unconditionally).
+## overridden per-backend.
 func _get_or_discover_fans() -> Array[String]:
 	return []
 

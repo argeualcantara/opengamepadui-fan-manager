@@ -115,7 +115,7 @@ func test_get_curve_returns_a_copy_not_a_reference() -> void:
 
 func test_start_normalizes_string_keyed_curve() -> void:
 	var backend := StubBackend.new()
-	engine.start(backend, "fan-0", {"10": 0, "20": 20, "30": 40})
+	engine.start(backend, "fan-0", {"10": 0.0, "20": 20.0, "30": 40.0})
 
 	var curve := engine.get_curve()
 	assert_true(curve.has(10))
@@ -126,25 +126,25 @@ func test_start_normalizes_string_keyed_curve() -> void:
 
 func test_start_immediately_applies_the_curve() -> void:
 	var backend := StubBackend.new()
-	engine.start(backend, "fan-0", {10: 0, 20: 50})
+	engine.start(backend, "fan-0", {10: 0.0, 20: 50.0})
 
 	assert_eq(backend.applied_curves.size(), 1)
 
 
 func test_load_curve_replaces_working_curve_and_applies_it() -> void:
 	var backend := StubBackend.new()
-	engine.start(backend, "fan-0", {10: 0, 20: 50})
+	engine.start(backend, "fan-0", {10: 0.0, 20: 50.0})
 
-	engine.load_curve({10: 5, 20: 90})
+	engine.load_curve({10: 5.0, 20: 90.0})
 
 	assert_eq(engine.get_curve(), {10: 5.0, 20: 90.0})
 	assert_eq(backend.applied_curves.size(), 2)
-	assert_eq(backend.applied_curves[1], {10: 5, 20: 90})
+	assert_eq(backend.applied_curves[1], {10: 5.0, 20: 90.0})
 
 
 func test_load_curve_does_nothing_before_start() -> void:
 	var backend := StubBackend.new()
-	engine.load_curve({10: 5})
+	engine.load_curve({10: 5.0})
 
 	assert_true(engine.get_curve().is_empty())
 	assert_eq(backend.applied_curves.size(), 0)
@@ -154,7 +154,7 @@ func test_set_point_does_not_write_to_hardware() -> void:
 	# Dragging a slider is a pure in-memory draft edit: only
 	# commit_draft() (the user clicking "Save") applies it.
 	var backend := StubBackend.new()
-	engine.start(backend, "fan-0", {10: 0, 20: 50})
+	engine.start(backend, "fan-0", {10: 0.0, 20: 50.0})
 	backend.applied_curves.clear()
 
 	engine.set_point(20, 77.0)
@@ -165,7 +165,7 @@ func test_set_point_does_not_write_to_hardware() -> void:
 
 func test_commit_draft_applies_the_edited_curve_to_hardware() -> void:
 	var backend := StubBackend.new()
-	engine.start(backend, "fan-0", {10: 0, 20: 50})
+	engine.start(backend, "fan-0", {10: 0.0, 20: 50.0})
 	backend.applied_curves.clear()
 
 	engine.set_point(20, 77.0)
@@ -177,7 +177,7 @@ func test_commit_draft_applies_the_edited_curve_to_hardware() -> void:
 
 func test_poll_reapplies_committed_curve_not_the_uncommitted_draft() -> void:
 	var backend := StubBackend.new()
-	engine.start(backend, "fan-0", {10: 0, 20: 50})
+	engine.start(backend, "fan-0", {10: 0.0, 20: 50.})
 
 	engine.set_point(20, 77.0)  # draft only, not committed
 	engine._apply_now()  # simulates a poll tick without a real Timer

@@ -7,6 +7,8 @@ class_name AsusWmiFanBackend
 ## path>#<channel>".
 
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
+const PwmChannel = preload("res://plugins/fan-manager/core/models/pwm_channel.gd")
+const PwmCurvePath = preload("res://plugins/fan-manager/core/models/pwm_curve_path.gd")
 const HWMON_DIR := "/sys/class/hwmon"
 const HWMON_NAME := "asus_custom_fan_curve"
 const MAX_HARDWARE_POINTS := 8
@@ -21,24 +23,38 @@ enum AsusPwmEnable { MANUAL = 1, BIOS = 2, RESET_DEFAULT = 3 }
 
 var _discovered_fans: Array[String] = []
 
+## fan_id -> PwmChannel, populated by _get_or_discover_fans().
+var _channels: Dictionary = {}
+
 
 func _init() -> void:
 	logger = Log.get_logger("FanManager AsusWmiFanBackend")
 
 
-## Returns fan<channel>_label (e.g. "cpu"/"gpu") for fan_id, falling
-## back to "Fan <channel>". The label lives on a different hwmon
-## device than the curve controls, so it's searched for separately.
+## Returns this channel's label, resolved once at discovery time (see
+## _resolve_fan_label()) instead of re-scanning hwmon on every call.
 func get_fan_label(fan_id: String) -> String:
-	var parts := PwmIo.split_channel_fan_id(fan_id)
-	var channel: int = parts["channel"]
+	var ch := _get_channel(fan_id)
+	if not ch:
+		return "Fan"
+	return ch.fan_label
 
-	var label := PwmIo.read_text("%s/fan%d_label" % [parts["device"], channel]).strip_edges()
+
+## Reads fan<channel>_label (e.g. "cpu"/"gpu") for device_path/channel,
+## falling back to "Fan <channel>". The label lives on a different
+## hwmon device than the curve controls, so it's searched for
+## separately via _find_fan_label_across_hwmon() when not found
+## directly on device_path.
+func _resolve_fan_label(device_path: String, channel: int) -> String:
+	var label := PwmIo.read_text("%s/fan%d_label" % [device_path, channel]).strip_edges()
 	if label.is_empty():
 		label = _find_fan_label_across_hwmon(channel)
 
 	if label.is_empty():
-		logger.debug("get_fan_label(%s): no label found, using generic 'Fan %d'" % [fan_id, channel])
+		logger.debug(
+			"_resolve_fan_label(%s#%d): no label found, using generic 'Fan %d'"
+			% [device_path, channel, channel]
+		)
 		return "Fan %d" % channel
 	return label.to_upper()
 
@@ -75,18 +91,14 @@ func requires_software_polling() -> bool:
 ## guaranteed to be the original factory curve (BIOS mode doesn't
 ## reset these registers), just whatever's currently cached.
 func get_bios_curve(fan_id: String) -> Dictionary:
-	var parts := PwmIo.split_channel_fan_id(fan_id)
-	var device: String = parts["device"]
-	var channel: int = parts["channel"]
+	var ch := _get_channel(fan_id)
+	if not ch:
+		return {}
 
 	var curve := {}
-	for point_index in range(1, MAX_HARDWARE_POINTS + 1):
-		var temp_raw := PwmIo.read_text(
-			"%s/pwm%d_auto_point%d_temp" % [device, channel, point_index]
-		).strip_edges()
-		var pwm_raw := PwmIo.read_text(
-			"%s/pwm%d_auto_point%d_pwm" % [device, channel, point_index]
-		).strip_edges()
+	for point in ch.points:
+		var temp_raw := PwmIo.read_text(point.temp_path).strip_edges()
+		var pwm_raw := PwmIo.read_text(point.fan_speed_path).strip_edges()
 
 		if temp_raw.is_empty() or pwm_raw.is_empty():
 			logger.warn(
@@ -124,9 +136,8 @@ func set_mode(mode: String) -> bool:
 
 	var failed_fans: Array[String] = []
 	for fan_id in fans:
-		var parts := PwmIo.split_channel_fan_id(fan_id)
-		var path := "%s/pwm%d_enable" % [parts["device"], parts["channel"]]
-		if not _write_text(path, str(enable_value)):
+		var ch := _get_channel(fan_id)
+		if not ch or not _write_text(ch.enable_path, str(enable_value)):
 			failed_fans.append(fan_id)
 
 	if not failed_fans.is_empty():
@@ -144,10 +155,10 @@ func get_current_mode() -> String:
 	if fans.is_empty():
 		return ""
 
-	var parts := PwmIo.split_channel_fan_id(fans[0])
-	var raw := PwmIo.read_text(
-		"%s/pwm%d_enable" % [parts["device"], parts["channel"]]
-	).strip_edges()
+	var ch := _get_channel(fans[0])
+	if not ch:
+		return ""
+	var raw := PwmIo.read_text(ch.enable_path).strip_edges()
 
 	var mode := ""
 	if raw == str(AsusPwmEnable.MANUAL):
@@ -171,43 +182,43 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 		)
 		return false
 
-	var parts := PwmIo.split_channel_fan_id(fan_id)
-	var device: String = parts["device"]
-	var channel: int = parts["channel"]
+	var ch := _get_channel(fan_id)
+	if not ch:
+		return false
 
 	var validated := _validate_and_clamp(curve)
-	var reduced := _reduce_to_hardware_points(validated)
-	var points: Array = reduced.keys()
-	points.sort()
+	# Reduces to this channel's actual point count, not the
+	# MAX_HARDWARE_POINTS constant: _build_channel() may have found
+	# fewer than 8 real pwm_auto_point<N> files on some hardware, and
+	# indexing ch.points[i] below would go out of bounds otherwise.
+	var reduced := _reduce_to_hardware_points(validated, ch.points.size())
+	var temps: Array = reduced.keys()
+	temps.sort()
 	logger.debug("apply_custom_curve(%s): uploading points %s" % [fan_id, reduced])
 
-	for i in points.size():
-		var temp: int = points[i]
+	for i in temps.size():
+		var temp: int = temps[i]
 		var percent: float = reduced[temp]
-		var point_index := i + 1
 		var pwm_value := PwmIo.percent_to_pwm(percent)
+		var point: PwmCurvePath = ch.points[i]
 
 		# Plain Celsius integer, not millidegrees: see get_bios_curve().
-		if not _write_text(
-			"%s/pwm%d_auto_point%d_temp" % [device, channel, point_index], str(temp)
-		):
+		if not _write_text(point.temp_path, str(temp)):
 			return false
-		if not _write_text(
-			"%s/pwm%d_auto_point%d_pwm" % [device, channel, point_index], str(pwm_value)
-		):
+		if not _write_text(point.fan_speed_path, str(pwm_value)):
 			return false
 
-	logger.info("Uploaded %d-point custom fan curve to %s" % [points.size(), fan_id])
+	logger.info("Uploaded %d-point custom fan curve to %s" % [temps.size(), fan_id])
 	return true
 
 
 func read_temperature(fan_id: String) -> float:
-	var parts := PwmIo.split_channel_fan_id(fan_id)
-	var raw := PwmIo.read_text(
-		"%s/temp%d_input" % [parts["device"], parts["channel"]]
-	).strip_edges()
+	var ch := _get_channel(fan_id)
+	if not ch:
+		return -1.0
+	var raw := PwmIo.read_text(ch.temp_sensor_path).strip_edges()
 	if raw.is_empty():
-		logger.warn("Unable to read temp%d_input for %s" % [int(parts["channel"]), fan_id])
+		logger.warn("Unable to read temp%d_input for %s" % [ch.channel_id, fan_id])
 		return -1.0
 	var celsius := raw.to_float() / 1000.0
 	logger.debug("read_temperature(%s) -> %.1f°C (raw='%s')" % [fan_id, celsius, raw])
@@ -215,10 +226,12 @@ func read_temperature(fan_id: String) -> float:
 
 
 func read_fan_percent(fan_id: String) -> float:
-	var parts := PwmIo.split_channel_fan_id(fan_id)
-	var raw := PwmIo.read_text("%s/pwm%d" % [parts["device"], parts["channel"]]).strip_edges()
+	var ch := _get_channel(fan_id)
+	if not ch:
+		return -1.0
+	var raw := PwmIo.read_text(ch.fan_speed_readback_path).strip_edges()
 	if raw.is_empty():
-		logger.warn("Unable to read pwm%d for %s" % [int(parts["channel"]), fan_id])
+		logger.warn("Unable to read pwm%d for %s" % [ch.channel_id, fan_id])
 		return -1.0
 	var percent := PwmIo.pwm_to_percent(raw.to_int())
 	logger.debug("read_fan_percent(%s) -> %.1f%% (raw='%s')" % [fan_id, percent, raw])
@@ -253,13 +266,15 @@ func _get_or_discover_fans() -> Array[String]:
 				for channel in range(1, MAX_FAN_CHANNELS + 1):
 					var pwm_path_channel = "%s/pwm%d_enable" % [device_path, channel]
 					logger.debug("checking PWM_ENABLE_PATH -> %s" % pwm_path_channel)
-					if FileAccess.file_exists("%s/pwm%d_enable" % [device_path, channel]):
-						discovered.append("%s#%d" % [device_path, channel])
+					if FileAccess.file_exists(pwm_path_channel):
+						var ch := _build_channel(device_path, channel)
+						_channels[ch.fan_id] = ch
+						discovered.append(ch.fan_id)
 		entry = dir.get_next()
 	dir.list_dir_end()
 
 	logger.info(
-		"Scanned %s: %s (looking for name == '%s')" % [HWMON_DIR, ", ".join(seen), HWMON_NAME]
+		"Scanned %s: %s" % [HWMON_DIR, ", ".join(seen)]
 	)
 	if discovered.is_empty():
 		logger.warn(
@@ -272,19 +287,70 @@ func _get_or_discover_fans() -> Array[String]:
 	return _discovered_fans
 
 
+## Builds a PwmChannel for device_path/channel, with all 8 hardware
+## curve points and the fan label resolved up front. fan_id always
+## uses the "<device>#<channel>
+func _build_channel(device_path: String, channel: int) -> PwmChannel:
+	var ch := PwmChannel.new()
+	ch.hwmon_path = device_path
+	ch.channel_id = channel
+	ch.fan_id = "%s#%d" % [device_path, channel]
+	ch.enable_path = "%s/pwm%d_enable" % [device_path, channel]
+	ch.temp_sensor_path = "%s/temp%d_input" % [device_path, channel]
+	ch.fan_speed_readback_path = "%s/pwm%d" % [device_path, channel]
+	ch.fan_label = _resolve_fan_label(device_path, channel)
+
+	# Stops at the first missing point, same assumption
+	# HwmonFanBackend._find_channel_ids() makes for
+	# pwm<N>_enable/temp<N>_input: these are sequential hardware
+	# registers.
+	var points: Array[PwmCurvePath] = []
+	for point_index in range(1, MAX_HARDWARE_POINTS + 1):
+		var temp_path := "%s/pwm%d_auto_point%d_temp" % [device_path, channel, point_index]
+		var fan_speed_path := "%s/pwm%d_auto_point%d_pwm" % [device_path, channel, point_index]
+		if not PwmIo.path_exists(temp_path) or not PwmIo.path_exists(fan_speed_path):
+			logger.debug(
+				"%s#%d: pwm_auto_point%d missing, stopping at %d point(s)"
+				% [device_path, channel, point_index, points.size()]
+			)
+			break
+		var point := PwmCurvePath.new()
+		point.temp_path = temp_path
+		point.fan_speed_path = fan_speed_path
+		points.append(point)
+	ch.points = points
+
+	return ch
+
+
+## Looks up the PwmChannel for fan_id, populating _channels first if
+## discovery hasn't run yet. Logs and returns null for an unknown
+## fan_id (e.g. a stale one from an old saved profile, no longer among
+## the currently discovered channels) instead of letting callers
+## dereference null.
+func _get_channel(fan_id: String) -> PwmChannel:
+	if _channels.is_empty():
+		_get_or_discover_fans()
+	var ch: PwmChannel = _channels.get(fan_id)
+	if not ch:
+		logger.warn("No discovered channel for fan_id '%s'" % fan_id)
+	return ch
+
+
 ## Switches fan_id to manual curve control (pwm<N>_enable=1) if not
 ## already set, since writes are otherwise ignored.
 func _ensure_manual_mode(fan_id: String) -> bool:
-	var parts := PwmIo.split_channel_fan_id(fan_id)
-	var path := "%s/pwm%d_enable" % [parts["device"], parts["channel"]]
+	var ch := _get_channel(fan_id)
+	if not ch:
+		return false
 
-	var raw := PwmIo.read_text(path).strip_edges()
+	var raw := PwmIo.read_text(ch.enable_path).strip_edges()
 	if raw == str(AsusPwmEnable.MANUAL):
 		logger.debug("%s already in manual fan curve control" % fan_id)
 		return true
 
 	logger.info("Switching %s to manual fan curve control" % fan_id)
-	return _write_text(path, str(AsusPwmEnable.MANUAL))
+	return _write_text(ch.enable_path, str(AsusPwmEnable.MANUAL))
 
 
 ## Clamps curve values to 0-100% and forces a non-decreasing sweep
@@ -306,16 +372,19 @@ func _validate_and_clamp(curve: Dictionary) -> Dictionary:
 	return validated
 
 
-## Reduces curve to at most MAX_HARDWARE_POINTS entries, keeping the
-## hottest points and dropping the coldest.
-func _reduce_to_hardware_points(curve: Dictionary) -> Dictionary:
+## Reduces curve to at most max_points entries (defaults to
+## MAX_HARDWARE_POINTS; callers with a specific channel should pass
+## its actual ch.points.size(), which can be lower on hardware that
+## doesn't expose all 8 pwm_auto_point<N> files), keeping the hottest
+## points and dropping the coldest.
+func _reduce_to_hardware_points(curve: Dictionary, max_points: int = MAX_HARDWARE_POINTS) -> Dictionary:
 	var points: Array = curve.keys()
 	points.sort()
 
-	if points.size() <= MAX_HARDWARE_POINTS:
+	if points.size() <= max_points:
 		return curve
 
-	var kept := points.slice(points.size() - MAX_HARDWARE_POINTS, points.size())
+	var kept := points.slice(points.size() - max_points, points.size())
 
 	var reduced := {}
 	for point in kept:
