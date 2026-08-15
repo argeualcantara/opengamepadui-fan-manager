@@ -115,8 +115,7 @@ func get_bios_curve(fan_id: String) -> Dictionary:
 	return curve
 
 
-## Sets mode ("bios"/"custom") for every discovered fan channel, twice
-## in a row: same rationale as apply_custom_curve()'s double upload.
+## Sets mode ("bios"/"custom") for every discovered fan channel.
 func set_mode(mode: String) -> bool:
 	var fans := _get_or_discover_fans()
 	if fans.is_empty():
@@ -133,10 +132,9 @@ func set_mode(mode: String) -> bool:
 			logger.error("Unknown fan mode '%s'" % mode)
 			return false
 
-	for pass_index in 2:
-		if not _write_mode_to_fans(mode, enable_value, fans):
-			return false
-		logger.debug("set_mode('%s') succeeded for all %d fan(s) (pass %d/2)" % [mode, fans.size(), pass_index + 1])
+	if not _write_mode_to_fans(mode, enable_value, fans):
+		return false
+	logger.debug("set_mode('%s') succeeded for all %d fan(s)" % [mode, fans.size()])
 
 	return true
 
@@ -178,19 +176,17 @@ func get_current_mode() -> String:
 	return mode
 
 
-## Validates, clamps, and reduces curve to 8 points, then uploads it
-## to fan_id, twice in a row: the asus_custom_fan_curve driver/EC has
-## been observed (real device logs) to not always adopt a freshly
-## written curve on the first upload, only on a repeat.
+## Validates, clamps, and reduces curve to 8 points, uploads it to
+## fan_id, then writes pwm<N>_enable=1 unconditionally. The kernel
+## driver (fan_curve_enable_store() in asus-wmi.c) only pushes its
+## internally cached curve points to the EC when pwm_enable=1 is
+## written; writing curve points alone just updates that cache and
+## marks it dirty, so pwm_enable must be (re)written after every point
+## upload, even if it was already 1, or the new points never reach the
+## EC.
 func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 	if curve.is_empty():
 		logger.warn("Cannot apply an empty custom curve to %s" % fan_id)
-		return false
-
-	if not _ensure_manual_mode(fan_id):
-		logger.error(
-			"Cannot apply custom curve to %s: failed to switch pwm_enable to manual" % fan_id
-		)
 		return false
 
 	var ch := _get_channel(fan_id)
@@ -204,11 +200,14 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 	# indexing ch.points[i] below would go out of bounds otherwise.
 	var reduced := _reduce_to_hardware_points(validated, ch.points.size())
 
-	for pass_index in 2:
-		if not _upload_points(fan_id, ch, reduced):
-			return false
-		logger.info("Uploaded %d-point custom fan curve to %s (pass %d/2)" % [reduced.size(), fan_id, pass_index + 1])
+	if not _upload_points(fan_id, ch, reduced):
+		return false
 
+	if not _write_text(ch.enable_path, str(AsusPwmEnable.MANUAL)):
+		logger.error("Uploaded curve to %s but failed to write pwm_enable to trigger it" % fan_id)
+		return false
+
+	logger.info("Uploaded %d-point custom fan curve to %s and triggered pwm_enable" % [reduced.size(), fan_id])
 	return true
 
 
@@ -355,22 +354,6 @@ func _get_channel(fan_id: String) -> PwmChannel:
 	if not ch:
 		logger.warn("No discovered channel for fan_id '%s'" % fan_id)
 	return ch
-
-
-## Switches fan_id to manual curve control (pwm<N>_enable=1) if not
-## already set, since writes are otherwise ignored.
-func _ensure_manual_mode(fan_id: String) -> bool:
-	var ch := _get_channel(fan_id)
-	if not ch:
-		return false
-
-	var raw := PwmIo.read_text(ch.enable_path).strip_edges()
-	if raw == str(AsusPwmEnable.MANUAL):
-		logger.debug("%s already in manual fan curve control" % fan_id)
-		return true
-
-	logger.info("Switching %s to manual fan curve control" % fan_id)
-	return _write_text(ch.enable_path, str(AsusPwmEnable.MANUAL))
 
 
 ## Clamps curve values to 0-100% and forces a non-decreasing sweep
