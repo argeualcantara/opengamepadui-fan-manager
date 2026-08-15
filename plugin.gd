@@ -50,6 +50,14 @@ func _ready() -> void:
 		)
 		add_child(game_curve_manager)
 		mode_select_overlay.bind_game_curve_manager(game_curve_manager)
+
+		# GameCurveManager._ready() (run synchronously by add_child() above)
+		# may already have loaded a per-game curve and emitted
+		# curve_applied before bind_game_curve_manager() connected this
+		# overlay to it, missing that signal. Force a resync so the UI
+		# reflects the actual engine state either way.
+		mode_select_overlay._on_curve_applied()
+
 		var data: Dictionary = store.load_data(mode_manager.hardware_id)
 		logger.debug("full saved config on plugin load: %s" % JSON.stringify(data, "\t"))
 
