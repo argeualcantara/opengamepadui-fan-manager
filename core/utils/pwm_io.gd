@@ -13,6 +13,7 @@ static var dry_run := true
 
 static var logger := Log.get_logger("FanManager PwmIo")
 
+static var has_permission := true
 
 ## Converts a 0-100% fan speed to a 0-255 pwm duty-cycle value.
 static func percent_to_pwm(percent: float) -> int:
@@ -51,17 +52,18 @@ static func write_text(path: String, text: String) -> bool:
 	if dry_run:
 		logger.info("[DRY RUN] would write '%s' to %s" % [text, path])
 		return true
+	if has_permission:
+		var file := FileAccess.open(path, FileAccess.WRITE)
+		if file:
+			file.store_string(text)
+			logger.debug("write_text('%s', '%s') succeeded" % [path, text])
+			return true
 
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	if file:
-		file.store_string(text)
-		logger.debug("write_text('%s', '%s') succeeded" % [path, text])
-		return true
-
-	logger.debug(
-		"write_text('%s') failed to open directly (%s), falling back to privileged helper"
-		% [path, error_string(FileAccess.get_open_error())]
-	)
+		logger.debug(
+			"write_text('%s') failed to open directly (%s), falling back to privileged helper"
+			% [path, error_string(FileAccess.get_open_error())]
+		)
+	has_permission = false
 	return _privileged_write(path, text)
 
 
