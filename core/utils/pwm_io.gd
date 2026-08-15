@@ -72,27 +72,42 @@ static func write_text(path: String, text: String) -> bool:
 const PRIV_WRITE_UNIT_TEMPLATE := "fan-manager-priv-write@%s.service"
 
 
-static func _escape_for_systemd(value: String) -> String:
-	var output := []
-	var exit_code := OS.execute("systemd-escape", ["--", value], output)
-	if exit_code != 0:
-		logger.debug("_escape_for_systemd('%s') failed: systemd-escape exited %d" % [value, exit_code])
-		return ""
-	return (output[0] as String).strip_edges()
+## Characters systemd-escape leaves unescaped (besides "/", which maps
+## to "-" below): letters, digits, ":", "_", ".". "-" itself is
+## deliberately NOT in this set even though it's otherwise a valid
+## unit-name character — it's reserved as the substitution target for
+## "/", so a literal "-" in the input has to be escaped too or it'd be
+## ambiguous with a "/". Matches systemd's own unit_name_escape().
+const _SYSTEMD_ESCAPE_SAFE_CHARS := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:_."
+
+
+## Reimplements `systemd-escape <value>` (no --path/--template) in
+## pure GDScript instead of shelling out to the real binary.
+## _privileged_write() calls this twice per write, and a single
+## "Apply" can trigger 30+ writes (8 curve points × 2 values × up to
+## 2 fans, plus pwm_enable) — spawning 2 extra processes per write on
+## top of the systemctl call itself was measurably freezing the UI
+## for several seconds on a real device. Every byte not in the safe
+## set (or "/" or "-") becomes "\xHH"; "/" becomes "-" directly.
+static func _systemd_escape(value: String) -> String:
+	var result := ""
+	for byte in value.to_utf8_buffer():
+		var ch := char(byte)
+		if ch == "/":
+			result += "-"
+		elif ch == "-" or ch == "\\" or not _SYSTEMD_ESCAPE_SAFE_CHARS.contains(ch):
+			result += "\\x%02x" % byte
+		else:
+			result += ch
+	return result
 
 
 ## Starts fan-manager-priv-write@<instance>.service (authorized
 ## without a password by policy/50-fan-manager.rules) to perform the
-## write as root. Returns false without spawning systemctl at all if
-## the instance can't be built, so this degrades cleanly rather than
-## running a command that can't possibly succeed.
+## write as root.
 static func _privileged_write(path: String, text: String) -> bool:
-	var escaped_path := _escape_for_systemd(path)
-	var escaped_value := _escape_for_systemd(text)
-	if escaped_path.is_empty() or escaped_value.is_empty():
-		return false
-
-	var unit := PRIV_WRITE_UNIT_TEMPLATE % (escaped_path + "@" + escaped_value)
+	var instance := _systemd_escape(path) + "@" + _systemd_escape(text)
+	var unit := PRIV_WRITE_UNIT_TEMPLATE % instance
 	var output := []
 	var exit_code := OS.execute("systemctl", ["start", unit], output, true)
 	if exit_code != 0:

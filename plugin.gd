@@ -11,22 +11,26 @@ const ModeSelectOverlay = preload("res://plugins/fan-manager/core/ui/mode_select
 const GameCurveManager = preload("res://plugins/fan-manager/core/modes/game_curve_manager.gd")
 const AsusWmiFanBackend = preload("res://plugins/fan-manager/core/backends/asus_wmi_fan_backend.gd")
 const HwmonFanBackend = preload("res://plugins/fan-manager/core/backends/hwmon_fan_backend.gd")
+const HardwareWriteQueue = preload("res://plugins/fan-manager/core/utils/hardware_write_queue.gd")
 
 var registry: FanBackendRegistry
 var store: FanCurveStore
 var mode_manager: FanModeManager
 var mode_select_overlay: ModeSelectOverlay
 var game_curve_manager: GameCurveManager
+var write_queue: HardwareWriteQueue
 
 
 func _ready() -> void:
+	write_queue = HardwareWriteQueue.new()
+
 	registry = FanBackendRegistry.new()
 	# Vendor-specific backends first; registry.detect() tries them in order.
 	registry.register(AsusWmiFanBackend.new())
 	registry.register(HwmonFanBackend.new())
 
 	store = FanCurveStore.new()
-	mode_manager = FanModeManager.new(registry, store)
+	mode_manager = FanModeManager.new(registry, store, write_queue)
 	add_child(mode_manager)
 
 	mode_select_overlay = load(plugin_base + "/core/ui/mode_select_overlay.tscn").instantiate()
@@ -55,6 +59,9 @@ func get_settings_menu() -> Control:
 
 
 func unload() -> void:
+	if write_queue:
+		write_queue.shutdown()
+
 	if game_curve_manager:
 		game_curve_manager.queue_free()
 	if mode_manager:

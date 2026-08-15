@@ -91,15 +91,6 @@ layout_mode = 2
 text = "Apply"
 focus_neighbor_top = NodePath("../../PerGameToggleSlot/PerGameToggle")
 
-[node name="ErrorLabel" type="Label" parent="."]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-theme_override_colors/font_color = Color(1, 0.333333, 0.333333, 1)
-text = "Unable to switch mode."
-label_settings = ExtResource("3")
-autowrap_mode = 3
-
 [node name="CustomEditorSlot" type="PanelContainer" parent="."]
 unique_name_in_owner = true
 visible = false

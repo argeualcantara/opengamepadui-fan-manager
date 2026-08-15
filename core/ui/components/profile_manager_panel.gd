@@ -235,7 +235,7 @@ func _confirm_overwrite() -> void:
 
 
 ## Saves every fan's current curve under profile_name (creating or
-## overwriting), commits the drafts to hardware, marks it active, and
+## overwriting), queues the drafts for hardware, marks it active, and
 ## refreshes the UI.
 func _commit_save(profile_name: String) -> void:
 	if curve_engines.is_empty():
@@ -258,8 +258,6 @@ func _commit_save(profile_name: String) -> void:
 			% profile_name
 		)
 
-	# Slider edits only touch the in-memory draft; this pushes it to
-	# hardware for every fan.
 	for engine in curve_engines.values():
 		engine.commit_draft()
 
@@ -275,10 +273,6 @@ func _commit_save(profile_name: String) -> void:
 		_close_dropdown()
 		_close_new_name_form()
 	logger.info("_commit_save('%s'): committed draft curve to hardware for %d fan(s)" % [profile_name, curve_engines.size()])
-	# Emitted before flush() on purpose: GameCurveManager listens to
-	# this and enqueues a per-game snapshot job in response (see
-	# store.enqueue()'s doc comment), flush() below is what actually
-	# runs that job and writes everything to disk in one shot.
 	active_profile_changed.emit(profile_name)
 	store.flush()
 

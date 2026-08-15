@@ -180,7 +180,7 @@ func test_poll_reapplies_committed_curve_not_the_uncommitted_draft() -> void:
 	engine.start(backend, "fan-0", {10: 0.0, 20: 50.})
 
 	engine.set_point(20, 77.0)  # draft only, not committed
-	engine._apply_now()  # simulates a poll tick without a real Timer
+	engine._queue_apply()  # simulates a poll tick without a real Timer
 
 	# The last thing actually written to hardware must still be the
 	# original committed curve (20 -> 50), not the uncommitted draft

@@ -14,6 +14,7 @@ const FanCurveStore = preload("res://plugins/fan-manager/core/persistence/fan_cu
 const CustomCurveEngine = preload("res://plugins/fan-manager/core/engine/custom_curve_engine.gd")
 const FanBackend = preload("res://plugins/fan-manager/core/backends/fan_backend.gd")
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
+const HardwareWriteQueue = preload("res://plugins/fan-manager/core/utils/hardware_write_queue.gd")
 
 signal mode_changed(mode: String)
 
@@ -23,6 +24,7 @@ var logger := Log.get_logger("FanManager FanModeManager")
 
 var registry: FanBackendRegistry
 var store: FanCurveStore
+var write_queue: HardwareWriteQueue
 
 ## One CustomCurveEngine per fan_id, created lazily as fans are
 ## discovered.
@@ -33,9 +35,10 @@ var hardware_id: String = ""
 var current_mode: String = ""
 
 
-func _init(p_registry: FanBackendRegistry, p_store: FanCurveStore) -> void:
+func _init(p_registry: FanBackendRegistry, p_store: FanCurveStore, p_write_queue: HardwareWriteQueue = null) -> void:
 	registry = p_registry
 	store = p_store
+	write_queue = p_write_queue
 
 
 func _ready() -> void:
@@ -90,9 +93,11 @@ func _adopt_current_hardware_mode() -> void:
 
 
 ## Switches to the given mode ("bios" or "custom"), cleanly stopping
-## the previous mode's activity first. Persists the new mode on
-## success. Returns false (and logs) if the mode is invalid or the
-## switch fails.
+## the previous mode's activity first. Persists the new mode
+## optimistically and returns true as soon as the switch is queued;
+## the actual backend write happens on write_queue and is only logged
+## if it fails. Returns false (and logs) only for an invalid mode or
+## no backend.
 func set_mode(mode: String) -> bool:
 	if not backend:
 		logger.error("Cannot set mode '%s': no fan backend available" % mode)
@@ -122,9 +127,7 @@ func set_mode(mode: String) -> bool:
 	for engine in curve_engines.values():
 		engine.stop()
 
-	if not backend.set_mode(mode):
-		logger.error("Backend failed to switch to mode '%s'" % mode)
-		return false
+	_queue_backend_mode_write(mode)
 
 	if mode == "custom":
 		_start_custom_mode()
@@ -134,6 +137,21 @@ func set_mode(mode: String) -> bool:
 	mode_changed.emit(mode)
 	logger.info("Switched fan mode from '%s' to '%s'" % [previous_mode, mode])
 	return true
+
+
+## Queues backend.set_mode(mode), keyed "mode" so rapid switches
+## coalesce instead of running concurrently. Falls back to a
+## synchronous call if no write_queue is set.
+func _queue_backend_mode_write(mode: String) -> void:
+	var backend_ref := backend
+	var job := func():
+		if not backend_ref.set_mode(mode):
+			logger.error("Backend failed to switch to mode '%s'" % mode)
+
+	if write_queue:
+		write_queue.submit("mode", job)
+	else:
+		job.call()
 
 
 func get_curve_engine(fan_id: String) -> CustomCurveEngine:
@@ -150,6 +168,7 @@ func _ensure_curve_engine(fan_id: String) -> CustomCurveEngine:
 
 	logger.debug("Creating new CustomCurveEngine for fan '%s'" % fan_id)
 	var engine := CustomCurveEngine.new()
+	engine.write_queue = write_queue
 	add_child(engine)
 	curve_engines[fan_id] = engine
 	return engine

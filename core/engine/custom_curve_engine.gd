@@ -20,12 +20,17 @@ class_name CustomCurveEngine
 ## hwmon_fan_backend.gd's header comment for why.
 const FanBackend = preload("res://plugins/fan-manager/core/backends/fan_backend.gd")
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
+const HardwareWriteQueue = preload("res://plugins/fan-manager/core/utils/hardware_write_queue.gd")
 
 signal curve_changed(curve: Dictionary)
 
-const DEFAULT_POLL_INTERVAL_SEC := 2.0
+const DEFAULT_POLL_INTERVAL_SEC := 10.0
 
 var logger := Log.get_logger("FanManager CustomCurveEngine")
+
+## Injected by FanModeManager. Null in tests that construct this engine
+## directly, which falls back to applying synchronously.
+var write_queue: HardwareWriteQueue
 
 var poll_interval_sec: float = DEFAULT_POLL_INTERVAL_SEC:
 	set(value):
@@ -50,9 +55,7 @@ func _ready() -> void:
 
 
 ## Attaches to backend/fan_id, sets draft and committed curve to
-## curve, and applies it immediately (an already-known-good curve, not
-## a mid-edit draft). curve's temperature keys may be String or int;
-## normalized on entry. Starts the poll timer only if
+## curve, and queues it for hardware. Starts the poll timer only if
 ## backend.requires_software_polling() is true.
 func start(backend: FanBackend, fan_id: String, curve: Dictionary) -> void:
 	_backend = backend
@@ -64,7 +67,7 @@ func start(backend: FanBackend, fan_id: String, curve: Dictionary) -> void:
 		_poll_timer.start()
 
 	logger.info("Started custom curve engine for fan '%s'" % fan_id)
-	_apply_now()
+	_queue_apply()
 
 
 ## Same as start(), reusing the currently attached backend/fan_id: used
@@ -120,20 +123,39 @@ func set_point(temperature: int, percent: float) -> void:
 	curve_changed.emit(get_curve())
 
 
-## Promotes the draft to the committed curve and applies it to hardware.
+## Promotes the draft to the committed curve and queues it for hardware.
 ## The only thing that turns slider edits into an actual hardware write.
 func commit_draft() -> void:
 	_committed_curve = _curve.duplicate(true)
-	_apply_now()
+	_queue_apply()
 
 
 func _on_poll_timeout() -> void:
-	_apply_now()
+	_queue_apply()
 
 
-func _apply_now() -> void:
+## Applies curve to hardware. Takes curve explicitly rather than
+## reading _committed_curve, so it's safe to run on write_queue's
+## background thread without touching engine state.
+func _apply_curve(backend: FanBackend, fan_id: String, curve: Dictionary) -> void:
+	if not backend or fan_id.is_empty() or curve.is_empty():
+		return
+
+	if not backend.apply_custom_curve(fan_id, curve):
+		logger.warn("Failed to apply custom curve to '%s'; will retry next cycle" % fan_id)
+
+
+## Snapshots backend/fan_id/committed curve and hands them to
+## write_queue, keyed by fan_id, so overlapping requests for this fan
+## coalesce instead of running concurrently. Falls back to applying
+## synchronously if no write_queue is set.
+func _queue_apply() -> void:
 	if not _backend or _fan_id.is_empty() or _committed_curve.is_empty():
 		return
 
-	if not _backend.apply_custom_curve(_fan_id, _committed_curve):
-		logger.warn("Failed to apply custom curve to '%s'; will retry next cycle" % _fan_id)
+	var job := _apply_curve.bind(_backend, _fan_id, _committed_curve.duplicate(true))
+
+	if write_queue:
+		write_queue.submit(_fan_id, job)
+	else:
+		job.call()

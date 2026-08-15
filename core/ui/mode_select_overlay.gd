@@ -41,7 +41,6 @@ var mode_manager: FanModeManager
 var logger := Log.get_logger("FanManager ModeSelectOverlay")
 
 @onready var mode_dropdown := $%ModeDropdown as Dropdown
-@onready var error_label := $%ErrorLabel as Label
 @onready var no_backend_label := $%NoBackendLabel as Label
 @onready var custom_editor_slot := $%CustomEditorSlot as Control
 @onready var fan_tabs_bar := $%FanTabsBar as HBoxContainer
@@ -69,8 +68,6 @@ var _mode_ids: Array[String] = []
 ## Shows the empty state if no backend is available, otherwise wires
 ## the mode dropdown/toggle/apply signals and selects the current mode.
 func _ready() -> void:
-	error_label.visible = false
-
 	if not mode_manager or not mode_manager.backend:
 		logger.warn("No FanModeManager/backend available; showing empty state")
 		mode_dropdown.visible = false
@@ -110,9 +107,10 @@ func _populate_mode_dropdown() -> void:
 
 
 ## Signal handler for Dropdown.item_selected. Applies the mode; on
-## failure, reverts the dropdown's visible selection (Dropdown/
-## OptionButton already moved it before this runs) back to the current
-## mode so the UI doesn't show a mode that was never actually applied.
+## failure (invalid mode or no backend, set_mode() no longer waits on
+## the hardware write itself), reverts the dropdown's visible
+## selection (Dropdown/OptionButton already moved it before this runs)
+## back to the current mode.
 func _on_mode_selected(index: int) -> void:
 	if index < 0 or index >= _mode_ids.size():
 		logger.debug("_on_mode_selected(%d): index out of range (%d ids)" % [index, _mode_ids.size()])
@@ -126,12 +124,9 @@ func _on_mode_selected(index: int) -> void:
 	logger.debug("_on_mode_selected(%d): switching to '%s'" % [index, mode_id])
 	if not mode_manager.set_mode(mode_id):
 		logger.debug("_on_mode_selected(%d): switch to '%s' failed, reverting dropdown" % [index, mode_id])
-		error_label.text = "Unable to switch to %s. Please try again." % MODE_LABELS[mode_id]
-		error_label.visible = true
 		_select_dropdown_for_mode(mode_manager.current_mode)
 		return
 
-	error_label.visible = false
 	_select_dropdown_for_mode(mode_id)
 
 	if mode_id == "custom":
@@ -146,7 +141,6 @@ func _on_mode_selected(index: int) -> void:
 
 ## Signal handler for FanModeManager.mode_changed.
 func _on_mode_changed(mode: String) -> void:
-	error_label.visible = false
 	_select_dropdown_for_mode(mode)
 
 

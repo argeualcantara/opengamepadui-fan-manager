@@ -151,12 +151,15 @@ func test_reopening_reapplies_last_saved_mode() -> void:
 	assert_true(backend2.mode_calls.has("custom"))
 
 
-func test_failed_backend_switch_does_not_change_current_mode() -> void:
+func test_failed_backend_switch_still_changes_current_mode_optimistically() -> void:
+	# set_mode() queues the backend write and returns before it runs, so
+	# a failing write no longer blocks the switch or reverts
+	# current_mode -- only the write itself is best-effort/logged.
 	manager.set_mode("custom")
 	backend.fail_next_set_mode = true
 
-	assert_false(manager.set_mode("bios"))
-	assert_eq(manager.current_mode, "custom", "current_mode must not change on a failed switch")
+	assert_true(manager.set_mode("bios"))
+	assert_eq(manager.current_mode, "bios")
 
 
 func test_custom_mode_creates_default_profile_when_none_saved() -> void:
