@@ -115,7 +115,8 @@ func get_bios_curve(fan_id: String) -> Dictionary:
 	return curve
 
 
-## Sets mode ("bios"/"custom") for every discovered fan channel.
+## Sets mode ("bios"/"custom") for every discovered fan channel, twice
+## in a row: same rationale as apply_custom_curve()'s double upload.
 func set_mode(mode: String) -> bool:
 	var fans := _get_or_discover_fans()
 	if fans.is_empty():
@@ -132,6 +133,15 @@ func set_mode(mode: String) -> bool:
 			logger.error("Unknown fan mode '%s'" % mode)
 			return false
 
+	for pass_index in 2:
+		if not _write_mode_to_fans(mode, enable_value, fans):
+			return false
+		logger.debug("set_mode('%s') succeeded for all %d fan(s) (pass %d/2)" % [mode, fans.size(), pass_index + 1])
+
+	return true
+
+
+func _write_mode_to_fans(mode: String, enable_value: int, fans: Array[String]) -> bool:
 	logger.debug("set_mode('%s'): writing pwm_enable=%d to %s" % [mode, enable_value, fans])
 
 	var failed_fans: Array[String] = []
@@ -144,7 +154,6 @@ func set_mode(mode: String) -> bool:
 		logger.error("Failed to set mode '%s' for fan(s): %s" % [mode, ", ".join(failed_fans)])
 		return false
 
-	logger.debug("set_mode('%s') succeeded for all %d fan(s)" % [mode, fans.size()])
 	return true
 
 
@@ -170,7 +179,9 @@ func get_current_mode() -> String:
 
 
 ## Validates, clamps, and reduces curve to 8 points, then uploads it
-## to fan_id in one shot.
+## to fan_id, twice in a row: the asus_custom_fan_curve driver/EC has
+## been observed (real device logs) to not always adopt a freshly
+## written curve on the first upload, only on a repeat.
 func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 	if curve.is_empty():
 		logger.warn("Cannot apply an empty custom curve to %s" % fan_id)
@@ -192,6 +203,16 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 	# fewer than 8 real pwm_auto_point<N> files on some hardware, and
 	# indexing ch.points[i] below would go out of bounds otherwise.
 	var reduced := _reduce_to_hardware_points(validated, ch.points.size())
+
+	for pass_index in 2:
+		if not _upload_points(fan_id, ch, reduced):
+			return false
+		logger.info("Uploaded %d-point custom fan curve to %s (pass %d/2)" % [reduced.size(), fan_id, pass_index + 1])
+
+	return true
+
+
+func _upload_points(fan_id: String, ch: PwmChannel, reduced: Dictionary) -> bool:
 	var temps: Array = reduced.keys()
 	temps.sort()
 	logger.debug("apply_custom_curve(%s): uploading points %s" % [fan_id, reduced])
@@ -208,7 +229,6 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 		if not _write_text(point.fan_speed_path, str(pwm_value)):
 			return false
 
-	logger.info("Uploaded %d-point custom fan curve to %s" % [temps.size(), fan_id])
 	return true
 
 

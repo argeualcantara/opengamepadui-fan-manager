@@ -131,14 +131,10 @@ func _on_mode_selected(index: int) -> void:
 
 	if mode_id == "custom":
 		logger.debug("_on_mode_selected(%d): auto-committing via apply_current() (reason: mode changed to '%s')" % [index, mode_id])
-		_apply_current_with_retry()
-	else:
-		if game_curve_manager:
-			logger.debug("_on_mode_selected(%d): committing via curve_session.apply_pressed() (reason: mode changed to '%s', no hardware push needed)" % [index, mode_id])
-			game_curve_manager.curve_session.apply_pressed()
-		# Same asus-wmi retry rationale as _apply_current_with_retry(): the
-		# pwm_enable switch itself may not reliably take on the first write.
-		get_tree().create_timer(5.0).timeout.connect(mode_manager.retry_backend_mode_write.bind(mode_id))
+		profiles_panel.apply_current()
+	elif game_curve_manager:
+		logger.debug("_on_mode_selected(%d): committing via curve_session.apply_pressed() (reason: mode changed to '%s', no hardware push needed)" % [index, mode_id])
+		game_curve_manager.curve_session.apply_pressed()
 
 	mode_manager.store.flush()
 
@@ -200,15 +196,7 @@ func _resync_fan_editors() -> void:
 ## GameCurveManager to snapshot the per-game context, if enabled.
 func _on_apply_pressed() -> void:
 	logger.debug("_on_apply_pressed(): committing via apply_current() (reason: user pressed Apply)")
-	_apply_current_with_retry()
-
-
-## Commits now, then again 5s later: some hardware (e.g. asus-wmi's
-## custom fan curve) doesn't reliably adopt a freshly-written curve on
-## the first apply, only on a repeat.
-func _apply_current_with_retry() -> void:
 	profiles_panel.apply_current()
-	get_tree().create_timer(5.0).timeout.connect(profiles_panel.apply_current)
 
 
 ## Selects mode in the dropdown, shows/hides the custom editor UI, and
