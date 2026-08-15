@@ -139,6 +139,15 @@ func set_mode(mode: String) -> bool:
 	return true
 
 
+## Re-queues backend.set_mode(mode) even if mode == current_mode,
+## unlike set_mode() itself which skips the write entirely in that
+## case. For callers retrying a write that may not have been adopted
+## by hardware yet.
+func retry_backend_mode_write(mode: String) -> void:
+	if mode in VALID_MODES:
+		_queue_backend_mode_write(mode)
+
+
 ## Queues backend.set_mode(mode), keyed "mode" so rapid switches
 ## coalesce instead of running concurrently. Falls back to a
 ## synchronous call if no write_queue is set.
