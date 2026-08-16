@@ -177,6 +177,23 @@ func test_custom_mode_creates_default_context_when_none_saved() -> void:
 	)
 
 
+func test_custom_mode_does_not_persist_default_context_when_per_game_enabled() -> void:
+	store.load_data(_test_hardware_id)
+	store.set_per_game_enabled(true)
+	store.flush()
+
+	manager.set_mode("custom")
+
+	# Still seeds the engine in memory from the built-in balanced curve...
+	assert_eq(manager.get_curve_engine("mock-fan-0").get_curve(), FanCurveUtils.DEFAULT_BALANCED_CURVE)
+
+	# ...but must not write a "__default__" game_curves entry: while
+	# per-game is on, that context is never read/written by GameCurveManager,
+	# so persisting it here would just be an orphaned entry.
+	var data := store.load_data(_test_hardware_id)
+	assert_false(data.get("game_curves", {}).has(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY))
+
+
 func test_custom_mode_reuses_existing_default_context_instead_of_recreating_it() -> void:
 	var custom_default := {10: 1.0, 20: 2.0, 30: 3.0, 40: 4.0, 50: 5.0, 60: 6.0, 70: 7.0, 80: 8.0, 90: 9.0, 100: 10.0}
 	store.load_data(_test_hardware_id)

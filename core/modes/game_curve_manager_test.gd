@@ -153,13 +153,19 @@ func test_all_apps_stopped_restores_steam_home_config() -> void:
 	assert_eq(_engine().get_curve(), {10: 1.0, 20: 2.0})
 
 
-func test_switching_context_without_saved_config_leaves_state_untouched() -> void:
+func test_switching_context_without_saved_config_creates_a_default_bios_entry() -> void:
 	manager.per_game_enabled = true
 	var mode_before := mode_manager.current_mode
 
 	launch_manager.switch_to(FakeRunningApp.new("Elden Ring"))
 
+	# A brand new context defaults to bios (never applied blind, matches
+	# mode_before here since nothing else has switched mode yet).
 	assert_eq(mode_manager.current_mode, mode_before)
+	assert_eq(mode_manager.current_mode, "bios")
+
+	var data := store.load_data(_test_hardware_id)
+	assert_eq(data["game_curves"]["elden ring"]["mode"], "bios")
 
 
 func test_state_change_with_toggle_off_does_not_save_a_config() -> void:
@@ -194,7 +200,9 @@ func test_mode_change_with_toggle_on_saves_full_state_for_active_context() -> vo
 func test_curve_edit_alone_does_not_save_a_config() -> void:
 	# Dragging a slider must never write anything by itself, only
 	# pressing Apply (curve_session.apply_pressed(), see
-	# _on_curve_session_committed()) does.
+	# _on_curve_session_committed()) does. A default game_curves entry
+	# already exists for "hades" (created on context switch, see
+	# _create_default_context()), but editing a slider must not touch it.
 	manager.per_game_enabled = true
 	launch_manager.switch_to(FakeRunningApp.new("Hades"))
 	mode_manager.set_mode("custom")
@@ -202,7 +210,8 @@ func test_curve_edit_alone_does_not_save_a_config() -> void:
 	_engine().set_point(30, 77.0)
 
 	var data := store.load_data(_test_hardware_id)
-	assert_false(data.get("game_curves", {}).has("hades"))
+	var saved_curve: Dictionary = data.get("game_curves", {}).get("hades", {}).get("curve", {})
+	assert_false(saved_curve.has(30) and saved_curve[30] == 77.0, "editing a slider must not persist the edit")
 
 
 func test_pressing_apply_saves_the_current_curve_for_active_context() -> void:
@@ -467,3 +476,94 @@ func test_snapshot_bundles_curves_from_every_fan_engine() -> void:
 	var saved_curve: Dictionary = data["game_curves"]["hades"]["curve"]
 	assert_true(saved_curve.has(_fan_id))
 	assert_true(saved_curve.has("fan-1"))
+
+
+## --- "__default__" is a context of its own, only while per_game_enabled
+## is off: the 6 scenarios from the design discussion, tested end to end. ---
+
+func test_fresh_start_has_no_history_context_default_mode_bios() -> void:
+	assert_false(manager.per_game_enabled)
+	assert_eq(manager.curve_session.context_key, FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY)
+	assert_eq(mode_manager.current_mode, "bios")
+
+	var data := store.load_data(_test_hardware_id)
+	assert_false(
+		data.get("game_curves", {}).has(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY),
+		"no entry should exist yet, before any commit"
+	)
+
+
+func test_bios_to_custom_with_per_game_off_creates_default_context_with_curves() -> void:
+	mode_manager.set_mode("custom", true)
+	store.flush()
+
+	var data := store.load_data(_test_hardware_id)
+	var default_entry: Dictionary = data["game_curves"][FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY]
+	assert_eq(default_entry["mode"], "custom")
+	assert_true(default_entry["curve"].has(_fan_id))
+
+
+func test_custom_to_bios_with_per_game_off_updates_default_context_mode() -> void:
+	mode_manager.set_mode("custom", true)
+	store.flush()
+
+	mode_manager.set_mode("bios", true)
+	store.flush()
+
+	var data := store.load_data(_test_hardware_id)
+	assert_eq(data["game_curves"][FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY]["mode"], "bios")
+
+
+func test_new_game_context_while_in_custom_mode_gets_bios_and_generic_curve() -> void:
+	mode_manager.set_mode("custom")
+	manager.per_game_enabled = true
+
+	launch_manager.switch_to(FakeRunningApp.new("Hades"))
+
+	var data := store.load_data(_test_hardware_id)
+	var hades_entry: Dictionary = data["game_curves"]["hades"]
+	assert_eq(hades_entry["mode"], "bios")
+	assert_true(hades_entry["curve"].has(_fan_id))
+
+
+func test_toggling_per_game_off_while_in_a_game_loads_default_context_onto_hardware() -> void:
+	# Configure "__default__" first, as if from an earlier per-game-off session.
+	mode_manager.set_mode("custom")
+	_engine().set_point(10, 42.0)
+	manager.curve_session.apply_pressed()
+	store.flush()
+
+	# Now go into a game and give it its own, different curve.
+	manager.per_game_enabled = true
+	launch_manager.switch_to(FakeRunningApp.new("Hades"))
+	mode_manager.set_mode("custom")
+	_engine().set_point(10, 99.0)
+	manager.curve_session.apply_pressed()
+	store.flush()
+
+	manager.per_game_enabled = false
+
+	var saved_curve: Dictionary = FanCurveUtils.normalize_keys(_engine().get_curve())
+	assert_eq(saved_curve[10], 42.0, "toggling per-game off must reload '__default__' onto the engine/hardware")
+
+
+func test_default_context_never_written_while_per_game_enabled() -> void:
+	manager.per_game_enabled = true
+	launch_manager.switch_to(FakeRunningApp.new("Hades"))
+	mode_manager.set_mode("custom", true)
+	_engine().set_point(30, 77.0)
+	manager.curve_session.apply_pressed()
+	store.flush()
+
+	mode_manager.set_mode("bios", true)
+	store.flush()
+
+	launch_manager.switch_to(FakeRunningApp.new("Persona"))
+	mode_manager.set_mode("custom", true)
+	store.flush()
+
+	var data := store.load_data(_test_hardware_id)
+	assert_false(
+		data.get("game_curves", {}).has(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY),
+		"'__default__' must never be written while per_game_enabled is true"
+	)

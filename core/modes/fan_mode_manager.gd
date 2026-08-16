@@ -189,7 +189,15 @@ func _ensure_curve_engine(fan_id: String) -> CustomCurveEngine:
 ## the "__default__" game_curves context (FanCurveUtils.
 ## GLOBAL_DEFAULT_CONTEXT_KEY) — the single shared curve GameCurveManager
 ## also reads/writes whenever per-game tracking is off. Created here,
-## built-in balanced, the first time this ever runs for a hardware_id.
+## built-in balanced, the first time this ever runs for a hardware_id —
+## but only persisted to disk while per-game tracking is off (read
+## straight from the store's own JSON cache, not injected: FanModeManager
+## otherwise has no dependency on GameCurveManager/per-game state on
+## purpose). While per-game is on, "__default__" isn't the context
+## GameCurveManager reads/writes (see its doc comment), so persisting it
+## here would just create an orphaned entry nothing reads until per-game
+## gets toggled off again; the fallback curve is still built in memory
+## either way, to seed the engines below.
 func _start_custom_mode() -> void:
 	var fans := backend.list_fans()
 	if fans.is_empty():
@@ -197,21 +205,28 @@ func _start_custom_mode() -> void:
 		return
 
 	var data: Dictionary = store.load_data(hardware_id)
+	var per_game_enabled: bool = data.get("per_game_enabled", false)
 	var game_curves: Dictionary = data.get("game_curves", {})
 	var default_entry: Dictionary = game_curves.get(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, {})
 	var default_curves: Dictionary = default_entry.get("curve", {})
-	logger.debug("_start_custom_mode(): fans=%s default_curves=%s" % [fans, default_curves.keys()])
+	logger.debug(
+		"_start_custom_mode(): fans=%s per_game_enabled=%s default_curves=%s"
+		% [fans, per_game_enabled, default_curves.keys()]
+	)
 
 	if default_curves.is_empty():
-		# Nothing saved yet: create the built-in balanced default,
+		# Nothing saved yet: build the built-in balanced default,
 		# applied identically to every fan.
 		for fan_id in fans:
 			default_curves[fan_id] = FanCurveUtils.DEFAULT_BALANCED_CURVE.duplicate()
-		store.set_game_curve(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, "custom", default_curves)
-		logger.info(
-			"Created built-in default curve ('%s' context) for hardware '%s'"
-			% [FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, hardware_id]
-		)
+		if per_game_enabled:
+			logger.debug("_start_custom_mode(): per_game_enabled is on, not persisting '%s'" % FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY)
+		else:
+			store.set_game_curve(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, "custom", default_curves)
+			logger.info(
+				"Created built-in default curve ('%s' context) for hardware '%s'"
+				% [FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, hardware_id]
+			)
 
 	for fan_id in fans:
 		var engine := _ensure_curve_engine(fan_id)

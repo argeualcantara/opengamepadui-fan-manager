@@ -174,7 +174,8 @@ func _on_fan_mode_changed(mode: String, user_initiated: bool) -> void:
 
 ## Derives the context key for to (a running app, or null for Steam
 ## home), persists it as the active context, and applies its saved
-## config if per_game_enabled and one exists.
+## config if per_game_enabled and one exists — if not, seeds a brand
+## new default entry for it (see _create_default_context()).
 func _apply_or_track(to) -> void:
 	var context_key := STEAM_HOME_KEY
 	if to != null and to.launch_item:
@@ -202,7 +203,31 @@ func _apply_or_track(to) -> void:
 		logger.debug("_apply_or_track('%s'): found saved config, applying" % context_key)
 		_apply_context(game_curves[context_key])
 	else:
-		logger.debug("_apply_or_track('%s'): no saved config, leaving state as-is" % context_key)
+		logger.debug("_apply_or_track('%s'): no saved config, creating default entry" % context_key)
+		_create_default_context(context_key, game_curves)
+
+
+## A context (game/Steam home) with no game_curves entry yet: seeds one
+## right away instead of silently leaving the engines/hardware showing
+## whatever the previous context left behind. Starts in bios mode, not
+## whatever curve was last active — an unconfigured context is unknown,
+## so it defaults to the safe/inert mode rather than immediately
+## pushing a possibly-irrelevant custom curve to hardware (mirrors the
+## same "unknown -> bios" principle FanModeManager._adopt_current_hardware_mode()
+## and _ready()'s saved-mode fallback already use). The curve itself is
+## seeded from FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY's (the shared
+## default), falling back to FanCurveUtils.DEFAULT_BALANCED_CURVE per
+## fan if that hasn't been created yet either — same fallback
+## FanModeManager._start_custom_mode() uses, so the stored entry always
+## has a real curve on disk, not an empty placeholder, once this
+## context is later switched to custom for the first time.
+func _create_default_context(context_key: String, game_curves: Dictionary) -> void:
+	var default_curve: Dictionary = {}
+	for fan_id in mode_manager.backend.list_fans():
+		default_curve[fan_id] = FanCurveUtils.DEFAULT_BALANCED_CURVE.duplicate()
+	logger.info("_create_default_context('%s'): new context, seeding bios mode with %d default curve entries" % [context_key, default_curve.size()])
+	store.set_game_curve(context_key, "bios", default_curve)
+	_apply_context({"mode": "bios", "curve": default_curve})
 
 
 ## Applies a saved context config ({mode, curve}): just switches mode.
