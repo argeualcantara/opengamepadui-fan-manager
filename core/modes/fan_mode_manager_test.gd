@@ -5,8 +5,8 @@ class MockBackend extends FanBackend:
 	var hardware_id_value := "mock-hardware"
 	# Only read by _adopt_current_custom_curve() now (the hardware was
 	# already in custom mode on a genuinely first run): the normal
-	# "no profile saved" path no longer reads this at all, see
-	# FanCurveUtils.DEFAULT_BALANCED_CURVE / test_custom_mode_creates_default_profile_when_none_saved.
+	# "no default context saved" path no longer reads this at all, see
+	# FanCurveUtils.DEFAULT_BALANCED_CURVE / test_custom_mode_creates_default_context_when_none_saved.
 	var bios_curve := {10: 0, 20: 0, 30: 15, 40: 25, 50: 35, 60: 45, 70: 60, 80: 75, 90: 90, 100: 100}
 	var mode_calls: Array[String] = []
 	var fail_next_set_mode := false
@@ -162,44 +162,32 @@ func test_failed_backend_switch_still_changes_current_mode_optimistically() -> v
 	assert_eq(manager.current_mode, "bios")
 
 
-func test_custom_mode_creates_default_profile_when_none_saved() -> void:
+func test_custom_mode_creates_default_context_when_none_saved() -> void:
 	manager.set_mode("custom")
 
 	assert_eq(manager.get_curve_engine("mock-fan-0").get_curve(), FanCurveUtils.DEFAULT_BALANCED_CURVE)
 
 	var data := store.load_data(_test_hardware_id)
-	assert_true(data["profiles"].has(FanCurveUtils.DEFAULT_PROFILE_NAME))
-	assert_eq(data["active_profile"], FanCurveUtils.DEFAULT_PROFILE_NAME)
+	var default_entry: Dictionary = data["game_curves"][FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY]
+	assert_eq(default_entry["mode"], "custom")
 	assert_eq(
-		data["profiles"][FanCurveUtils.DEFAULT_PROFILE_NAME]["mock-fan-0"],
+		default_entry["curve"]["mock-fan-0"],
 		FanCurveUtils.DEFAULT_BALANCED_CURVE,
-		"a profile bundles one curve per fan_id (tasks/14), even with a single fan"
+		"the default context bundles one curve per fan_id (tasks/14), even with a single fan"
 	)
 
 
-func test_custom_mode_reuses_existing_default_profile_instead_of_recreating_it() -> void:
+func test_custom_mode_reuses_existing_default_context_instead_of_recreating_it() -> void:
 	var custom_default := {10: 1.0, 20: 2.0, 30: 3.0, 40: 4.0, 50: 5.0, 60: 6.0, 70: 7.0, 80: 8.0, 90: 9.0, 100: 10.0}
-	store.save_profile(
-		_test_hardware_id, FanCurveUtils.DEFAULT_PROFILE_NAME, {"mock-fan-0": custom_default}
-	)
+	store.load_data(_test_hardware_id)
+	store.set_game_curve(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, "custom", {"mock-fan-0": custom_default})
+	store.flush()
 
 	manager.set_mode("custom")
 
-	# Must reuse the existing "Default" as-is, not overwrite it with
-	# FanCurveUtils.DEFAULT_BALANCED_CURVE.
+	# Must reuse the existing "__default__" curve as-is, not overwrite
+	# it with FanCurveUtils.DEFAULT_BALANCED_CURVE.
 	assert_eq(manager.get_curve_engine("mock-fan-0").get_curve(), custom_default)
-
-
-func test_custom_mode_loads_active_profile_when_one_is_saved() -> void:
-	var profile_curve := {10: 5.0, 20: 15.0, 100: 90.0}
-	store.save_profile(_test_hardware_id, "Perfil", {"mock-fan-0": profile_curve})
-	var data := store.load_data(_test_hardware_id)
-	data["active_profile"] = "Perfil"
-	store.save(_test_hardware_id, data)
-
-	manager.set_mode("custom")
-
-	assert_eq(manager.get_curve_engine("mock-fan-0").get_curve(), profile_curve)
 
 
 func test_custom_mode_preserves_in_memory_edits_across_mode_switches() -> void:

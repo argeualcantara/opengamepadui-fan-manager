@@ -70,7 +70,6 @@ var store: FanCurveStore
 var backend: StubBackend
 var registry: FanBackendRegistry
 var mode_manager: FanModeManager
-var profiles_panel: ProfileManagerPanel
 var launch_manager: FakeLaunchManager
 var manager: GameCurveManager
 
@@ -90,22 +89,9 @@ func before_each() -> void:
 	add_child_autoqfree(mode_manager)
 	await wait_frames(1, "let FanModeManager._ready() run")
 
-	profiles_panel = ProfileManagerPanel.new()
-	add_child_autoqfree(profiles_panel)
-	await wait_frames(1, "let ProfileManagerPanel._ready() run")
-	profiles_panel.refresh(store, _test_hardware_id, mode_manager.get_all_curve_engines())
-
-	# In production, ModeSelectOverlay re-syncs ProfileManagerPanel with
-	# the (possibly newly-created) per-fan engines whenever the mode
-	# changes: replicated here since no overlay is instantiated in
-	# this test.
-	mode_manager.mode_changed.connect(
-		func(_mode): profiles_panel.refresh(store, _test_hardware_id, mode_manager.get_all_curve_engines())
-	)
-
 	launch_manager = FakeLaunchManager.new()
 
-	manager = GameCurveManager.new(launch_manager, store, mode_manager, profiles_panel, _test_hardware_id)
+	manager = GameCurveManager.new(launch_manager, store, mode_manager, _test_hardware_id)
 	add_child_autoqfree(manager)
 	await wait_frames(1, "let GameCurveManager._ready() run")
 
@@ -151,7 +137,7 @@ func test_all_apps_stopped_restores_steam_home_config() -> void:
 	var data := store.load_data(_test_hardware_id)
 	data["game_curves"] = {
 		GameCurveManager.STEAM_HOME_KEY: {
-			"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 1.0, 20: 2.0}}
+			"mode": "custom", "curve": {_fan_id: {10: 1.0, 20: 2.0}}
 		}
 	}
 	store.save(_test_hardware_id, data)
@@ -188,14 +174,17 @@ func test_mode_change_with_toggle_on_saves_full_state_for_active_context() -> vo
 	manager.per_game_enabled = true
 	launch_manager.switch_to(FakeRunningApp.new("Hades"))
 
-	mode_manager.set_mode("custom")
-	# A bare set_mode() no longer persists anything by itself (tasks/18,
-	# etapa 4): production drives this through ModeSelectOverlay.
-	# _on_mode_selected(), which calls profiles_panel.apply_current()
-	# right after a successful set_mode(), that's what actually
-	# commits curve_session to COMMITTED and triggers the game_curves
-	# write, via GameCurveManager._on_curve_session_committed().
-	profiles_panel.apply_current()
+	# user_initiated=true: production drives this through
+	# ModeSelectOverlay._on_mode_selected(), which calls
+	# mode_manager.set_mode(mode_id, true) — GameCurveManager reacts to
+	# fan_mode_changed(mode, user_initiated=true) by committing
+	# curve_session directly, that's what triggers the game_curves
+	# write via GameCurveManager._on_curve_session_committed(). That
+	# only enqueues the snapshot job though (FanCurveStore.enqueue()) —
+	# production's _on_mode_selected() drains it via store.flush() at
+	# its own end, replicated here.
+	mode_manager.set_mode("custom", true)
+	store.flush()
 
 	var data := store.load_data(_test_hardware_id)
 	assert_true(data["game_curves"].has("hades"))
@@ -204,8 +193,8 @@ func test_mode_change_with_toggle_on_saves_full_state_for_active_context() -> vo
 
 func test_curve_edit_alone_does_not_save_a_config() -> void:
 	# Dragging a slider must never write anything by itself, only
-	# pressing Apply (profiles_panel.apply_current(), which commits the
-	# draft to hardware and emits active_profile_changed) does.
+	# pressing Apply (curve_session.apply_pressed(), see
+	# _on_curve_session_committed()) does.
 	manager.per_game_enabled = true
 	launch_manager.switch_to(FakeRunningApp.new("Hades"))
 	mode_manager.set_mode("custom")
@@ -222,7 +211,14 @@ func test_pressing_apply_saves_the_current_curve_for_active_context() -> void:
 	mode_manager.set_mode("custom")
 
 	_engine().set_point(30, 77.0)
-	profiles_panel.apply_current()
+	# Production: ModeSelectOverlay._on_apply_pressed() calls
+	# curve_session.apply_pressed() directly (Apply never goes through
+	# set_mode(), see that handler's doc comment for why), which
+	# commits every engine's draft to hardware and enqueues the
+	# game_curves snapshot job; its own trailing store.flush() is what
+	# actually drains that job, replicated here.
+	manager.curve_session.apply_pressed()
+	store.flush()
 
 	var data := store.load_data(_test_hardware_id)
 	var saved_curve: Dictionary = FanCurveUtils.normalize_keys(data["game_curves"]["hades"]["curve"][_fan_id])
@@ -239,11 +235,10 @@ func test_switching_to_bios_persists_the_mode_change_for_the_active_context() ->
 	# engine.commit_draft() and, on real ASUS hardware, silently flip
 	# pwm_enable back to manual right after set_mode() just switched it
 	# to bios (confirmed via device log). Going to bios never needs a
-	# hardware push or a profiles["Default"] write: the curve itself
-	# didn't change, only the mode did.
+	# hardware push: the curve itself didn't change, only the mode did.
 	var data := store.load_data(_test_hardware_id)
 	data["game_curves"] = {
-		"hades": {"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 5.0, 20: 10.0}}}
+		"hades": {"mode": "custom", "curve": {_fan_id: {10: 5.0, 20: 10.0}}}
 	}
 	store.save(_test_hardware_id, data)
 
@@ -287,22 +282,20 @@ func test_switching_to_bios_does_not_commit_the_draft_curve_to_hardware() -> voi
 	)
 
 
-func test_switching_mode_with_toggle_off_saves_the_current_curve_to_default_profile() -> void:
-	# Gap found in review: with per-game off, a mode switch previously
-	# didn't save anything to profiles["Default"] at all, only
-	# ProfileManagerPanel._commit_save() did, and only from a real
-	# Apply press. Now ModeSelectOverlay._on_mode_selected() calls
-	# apply_current() on every mode switch too, so an edit made just
-	# before switching modes is captured either way.
+func test_applying_with_toggle_off_saves_the_current_curve_to_default_context() -> void:
+	# per_game_enabled is off (default): curve_session's context_key is
+	# pinned at FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY (see _ready()),
+	# so a real Apply press commits there, same mechanism as any other
+	# context.
 	mode_manager.set_mode("custom")
 	_engine().set_point(10, 42.0)
 
-	mode_manager.set_mode("bios")
-	profiles_panel.apply_current()
+	manager.curve_session.apply_pressed()
+	store.flush()
 
 	var data := store.load_data(_test_hardware_id)
 	var saved_curve: Dictionary = FanCurveUtils.normalize_keys(
-		data["profiles"][FanCurveUtils.DEFAULT_PROFILE_NAME][_fan_id]
+		data["game_curves"][FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY]["curve"][_fan_id]
 	)
 	assert_eq(saved_curve[10], 42.0)
 
@@ -310,7 +303,7 @@ func test_switching_mode_with_toggle_off_saves_the_current_curve_to_default_prof
 func test_applying_saved_context_restores_mode_and_curve() -> void:
 	var data := store.load_data(_test_hardware_id)
 	data["game_curves"] = {
-		"hades": {"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 5.0, 20: 10.0}}}
+		"hades": {"mode": "custom", "curve": {_fan_id: {10: 5.0, 20: 10.0}}}
 	}
 	store.save(_test_hardware_id, data)
 
@@ -334,7 +327,7 @@ func test_applying_saved_context_with_a_mode_change_does_not_corrupt_the_saved_c
 	# whatever _start_custom_mode() had just seeded as a placeholder.
 	var data := store.load_data(_test_hardware_id)
 	data["game_curves"] = {
-		"hades": {"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 5.0, 20: 10.0}}}
+		"hades": {"mode": "custom", "curve": {_fan_id: {10: 5.0, 20: 10.0}}}
 	}
 	store.save(_test_hardware_id, data)
 	assert_eq(mode_manager.current_mode, "bios", "sanity check: switching to this context must involve a real mode change")
@@ -358,10 +351,10 @@ func test_bios_context_still_seeds_engines_so_a_later_manual_custom_switch_keeps
 	var data := store.load_data(_test_hardware_id)
 	data["game_curves"] = {
 		GameCurveManager.STEAM_HOME_KEY: {
-			"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 1.0, 20: 2.0}}
+			"mode": "custom", "curve": {_fan_id: {10: 1.0, 20: 2.0}}
 		},
 		"hades": {
-			"mode": "bios", "active_profile": null, "curve": {_fan_id: {10: 9.0, 20: 8.0}}
+			"mode": "bios", "curve": {_fan_id: {10: 9.0, 20: 8.0}}
 		},
 	}
 	store.save(_test_hardware_id, data)
@@ -385,7 +378,7 @@ func test_bios_context_still_seeds_engines_so_a_later_manual_custom_switch_keeps
 
 func test_applying_saved_invalid_mode_falls_back_gracefully() -> void:
 	var data := store.load_data(_test_hardware_id)
-	data["game_curves"] = {"hades": {"mode": "turbo", "active_profile": null, "curve": {}}}
+	data["game_curves"] = {"hades": {"mode": "turbo", "curve": {}}}
 	store.save(_test_hardware_id, data)
 
 	var mode_before := mode_manager.current_mode
@@ -398,7 +391,7 @@ func test_applying_saved_invalid_mode_falls_back_gracefully() -> void:
 func test_enabling_toggle_with_game_already_running_applies_immediately() -> void:
 	launch_manager.switch_to(FakeRunningApp.new("Hades"))
 	var data := store.load_data(_test_hardware_id)
-	data["game_curves"] = {"hades": {"mode": "custom", "active_profile": null, "curve": {_fan_id: {10: 9.0}}}}
+	data["game_curves"] = {"hades": {"mode": "custom", "curve": {_fan_id: {10: 9.0}}}}
 	store.save(_test_hardware_id, data)
 
 	manager.per_game_enabled = true
@@ -407,33 +400,37 @@ func test_enabling_toggle_with_game_already_running_applies_immediately() -> voi
 	assert_eq(_engine().get_curve(), {10: 9.0})
 
 
-func test_disabling_toggle_in_bios_mode_still_reloads_default_profile() -> void:
-	# Regression for the etapa 5 gap: apply_profile() only ever writes
-	# curve points (never pwm_enable/mode), so reloading "Default" on
-	# toggle-off must not depend on currently being in custom mode.
-	store.save_profile(_test_hardware_id, FanCurveUtils.DEFAULT_PROFILE_NAME, {_fan_id: {10: 11.0, 20: 22.0}})
+func test_disabling_toggle_in_bios_mode_leaves_the_previous_context_in_memory() -> void:
+	# _on_curve_session_loaded() deliberately stays gated on
+	# mode == "custom" (see its doc comment): CustomCurveEngine.
+	# load_curve() -> start() unconditionally queues a hardware write
+	# and can restart the poll timer, the same class of real-hardware
+	# bug (pwm_enable flip-back) an earlier fix guarded against for the
+	# commit path — reloading "__default__" while nominally in bios
+	# would reintroduce it. Accepted trade-off: toggling per-game off
+	# while in bios does not reload the engine, it keeps showing
+	# whatever context was last active in memory, until the next real
+	# mode switch to custom re-seeds it from the store.
+	store.load_data(_test_hardware_id)
+	store.set_game_curve(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, "custom", {_fan_id: {10: 11.0, 20: 22.0}})
+	store.flush()
 
-	# Populate curve_engines by visiting custom mode once (as a real
-	# session would), then switch back to bios before toggling.
 	mode_manager.set_mode("custom")
+	_engine().load_curve({10: 99.0, 20: 99.0})
 	mode_manager.set_mode("bios")
 	assert_eq(mode_manager.current_mode, "bios")
 
 	manager.per_game_enabled = true
 	manager.per_game_enabled = false
 
-	assert_eq(_engine().get_curve(), {10: 11.0, 20: 22.0})
+	assert_eq(_engine().get_curve(), {10: 99.0, 20: 99.0}, "reload must not happen outside custom mode")
 	assert_eq(mode_manager.current_mode, "bios", "toggling per-game off must not itself change mode")
 
 
 func test_disabling_toggle_in_bios_mode_does_not_leave_the_engine_polling() -> void:
-	# Regression: apply_profile() -> CustomCurveEngine.load_curve() ->
-	# start() always (re)starts the software poll timer when the
-	# backend needs one (StubBackend defaults to requiring it, like
-	# HwmonFanBackend). Reloading "Default" while in bios (the etapa 5
-	# fix above) must not leave that timer running: FanModeManager.
-	# set_mode() is the only other place that stops engines, and it
-	# isn't involved in this toggle.
+	# FanModeManager.set_mode() is the only place that stops engines,
+	# and it isn't involved in this toggle: confirms toggling per-game
+	# off while in bios can't restart polling by any path.
 	mode_manager.set_mode("custom")
 	mode_manager.set_mode("bios")
 	assert_true(_engine()._poll_timer.is_stopped(), "sanity check: leaving custom mode already stops the engine")
@@ -461,10 +458,10 @@ func test_snapshot_bundles_curves_from_every_fan_engine() -> void:
 	# FanModeManager would for a multi-fan backend.
 	var second_engine := mode_manager._ensure_curve_engine("fan-1")
 	second_engine.start(backend, "fan-1", {10: 3.0, 20: 6.0})
-	profiles_panel.refresh(store, _test_hardware_id, mode_manager.get_all_curve_engines())
 
 	_engine().set_point(30, 77.0)
-	profiles_panel.apply_current()
+	manager.curve_session.apply_pressed()
+	store.flush()
 
 	var data := store.load_data(_test_hardware_id)
 	var saved_curve: Dictionary = data["game_curves"]["hades"]["curve"]

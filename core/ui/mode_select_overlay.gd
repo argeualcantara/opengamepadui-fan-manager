@@ -12,14 +12,12 @@ class_name ModeSelectOverlay
 ## either: every child sits flat, one below the other. The Quick Bar's
 ## own outer viewport already scrolls the whole card list.
 ##
-## FanModeManager/ProfileManagerPanel/GameCurveManager/
-## CustomCurveEditor/FanTabButton below are referenced via preload()'d
-## consts, not bare class_name lookups: see hwmon_fan_backend.gd's
-## header comment for why. Dropdown/Toggle are OGUI's own core classes
-## (compiled into the base game), so they resolve fine as bare names,
-## same as FocusGroup/Label.
+## FanModeManager/GameCurveManager/CustomCurveEditor/FanTabButton below
+## are referenced via preload()'d consts, not bare class_name lookups:
+## see hwmon_fan_backend.gd's header comment for why. Dropdown/Toggle
+## are OGUI's own core classes (compiled into the base game), so they
+## resolve fine as bare names, same as FocusGroup/Label.
 const FanModeManager = preload("res://plugins/fan-manager/core/modes/fan_mode_manager.gd")
-const ProfileManagerPanel = preload("res://plugins/fan-manager/core/ui/components/profile_manager_panel.gd")
 const GameCurveManager = preload("res://plugins/fan-manager/core/modes/game_curve_manager.gd")
 const CurveSessionState = preload("res://plugins/fan-manager/core/modes/curve_session_state.gd")
 const CustomCurveEditor = preload("res://plugins/fan-manager/core/ui/components/custom_curve_editor.gd")
@@ -45,7 +43,6 @@ var logger := Log.get_logger("FanManager ModeSelectOverlay")
 @onready var custom_editor_slot := $%CustomEditorSlot as Control
 @onready var fan_tabs_bar := $%FanTabsBar as HBoxContainer
 @onready var editors_container := $%EditorsContainer as Control
-@onready var profiles_panel := $%ProfilesPanel as ProfileManagerPanel
 @onready var dirty_badge := $%DirtyBadge as PanelContainer
 @onready var per_game_toggle := $%PerGameToggle as Toggle
 @onready var apply_button := $%ApplyButton as CardButton
@@ -77,7 +74,7 @@ func _ready() -> void:
 		return
 
 	no_backend_label.visible = false
-	mode_manager.mode_changed.connect(_on_mode_changed)
+	mode_manager.fan_mode_changed.connect(_on_fan_mode_changed)
 
 	_populate_mode_dropdown()
 	mode_dropdown.item_selected.connect(_on_mode_selected)
@@ -122,25 +119,24 @@ func _on_mode_selected(index: int) -> void:
 		return
 
 	logger.debug("_on_mode_selected(%d): switching to '%s'" % [index, mode_id])
-	if not mode_manager.set_mode(mode_id):
+	if not mode_manager.set_mode(mode_id, true):
 		logger.debug("_on_mode_selected(%d): switch to '%s' failed, reverting dropdown" % [index, mode_id])
 		_select_dropdown_for_mode(mode_manager.current_mode)
 		return
 
 	_select_dropdown_for_mode(mode_id)
 
-	if mode_id == "custom":
-		logger.debug("_on_mode_selected(%d): auto-committing via apply_current() (reason: mode changed to '%s')" % [index, mode_id])
-		profiles_panel.apply_current()
-	elif game_curve_manager:
-		logger.debug("_on_mode_selected(%d): committing via curve_session.apply_pressed() (reason: mode changed to '%s', no hardware push needed)" % [index, mode_id])
-		game_curve_manager.curve_session.apply_pressed()
-
+	# No separate commit call needed here: set_mode(mode_id, true)
+	# already fired fan_mode_changed(mode_id, user_initiated=true),
+	# which GameCurveManager._on_fan_mode_changed() reacts to by
+	# calling curve_session.apply_pressed() itself (commits every
+	# engine's draft to hardware while in custom mode, and stages the
+	# game_curves write) — this flush() just drains that.
 	mode_manager.store.flush()
 
 
-## Signal handler for FanModeManager.mode_changed.
-func _on_mode_changed(mode: String) -> void:
+## Signal handler for FanModeManager.fan_mode_changed.
+func _on_fan_mode_changed(mode: String, _user_initiated: bool) -> void:
 	_select_dropdown_for_mode(mode)
 
 
@@ -150,9 +146,8 @@ func _on_curve_session_state_changed(state: CurveSessionState.State, _context_ke
 	dirty_badge.visible = state == CurveSessionState.State.DIRTY
 
 
-## Called by plugin.gd once GameCurveManager exists (needs
-## profiles_panel, which only resolves after this overlay's own
-## _ready()). Syncs the toggle to manager's state and wires it up.
+## Called by plugin.gd once GameCurveManager exists. Syncs the toggle
+## to manager's state and wires it up.
 func bind_game_curve_manager(manager: GameCurveManager) -> void:
 	game_curve_manager = manager
 	per_game_toggle.button_pressed = manager.per_game_enabled
@@ -176,7 +171,6 @@ func _on_curve_applied() -> void:
 	if mode_manager.current_mode != "custom":
 		return
 	_resync_fan_editors()
-	profiles_panel.refresh(mode_manager.store, mode_manager.hardware_id, mode_manager.get_all_curve_engines())
 
 
 ## Re-pulls each built CustomCurveEditor's displayed curve from its
@@ -189,19 +183,25 @@ func _resync_fan_editors() -> void:
 
 
 ## Commits whatever's currently on the sliders (the draft curve) to
-## hardware and disk, standing in for ProfileManagerPanel's own Save
-## button while its picker UI is hidden: see
-## ProfileManagerPanel.apply_current(). Its active_profile_changed
-## signal (emitted at the end of every commit) is what tells
-## GameCurveManager to snapshot the per-game context, if enabled.
+## hardware and disk. Apply never goes through set_mode() (this button
+## only exists in Custom Mode — see apply_button.visible in
+## _select_dropdown_for_mode()), so it can't rely on fan_mode_changed
+## to notify GameCurveManager: calls curve_session.apply_pressed()
+## directly instead, symmetric to what _on_fan_mode_changed() does for
+## a real mode switch. That call is what actually pushes every
+## engine's draft to hardware (GameCurveManager._on_curve_session_committed())
+## and stages the game_curves write; it only enqueues that write
+## though (see FanCurveStore.enqueue()'s doc comment), so flush()
+## explicitly at the end to drain it.
 func _on_apply_pressed() -> void:
-	logger.debug("_on_apply_pressed(): committing via apply_current() (reason: user pressed Apply)")
-	profiles_panel.apply_current()
+	logger.debug("_on_apply_pressed(): committing (reason: user pressed Apply)")
+	if game_curve_manager:
+		game_curve_manager.curve_session.apply_pressed()
+	mode_manager.store.flush()
 
 
 ## Selects mode in the dropdown, shows/hides the custom editor UI, and
-## (when entering "custom") builds/binds the fan editors and refreshes
-## the profile picker.
+## (when entering "custom") builds/binds the fan editors.
 func _select_dropdown_for_mode(mode: String) -> void:
 	var idx := _mode_ids.find(mode)
 	if idx != -1:
@@ -215,8 +215,6 @@ func _select_dropdown_for_mode(mode: String) -> void:
 
 	_ensure_fan_editors()
 	_resync_fan_editors()
-
-	profiles_panel.refresh(mode_manager.store, mode_manager.hardware_id, mode_manager.get_all_curve_engines())
 
 	# Re-applied every time Custom Mode turns on: idempotent, and cheap
 	# insurance against ApplyButton's neighbor going stale.

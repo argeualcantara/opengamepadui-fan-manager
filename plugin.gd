@@ -37,15 +37,13 @@ func _ready() -> void:
 	mode_select_overlay.mode_manager = mode_manager
 	add_to_quick_bar(mode_select_overlay, null)
 
-	# profiles_panel only resolves once add_to_quick_bar() above has run
-	# the overlay's _ready(). Skipped if no backend was detected.
+	# Skipped if no backend was detected.
 	if mode_manager.backend:
 		var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
 		game_curve_manager = GameCurveManager.new(
 			launch_manager,
 			store,
 			mode_manager,
-			mode_select_overlay.profiles_panel,
 			mode_manager.hardware_id
 		)
 		add_child(game_curve_manager)

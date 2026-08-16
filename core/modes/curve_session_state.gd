@@ -21,12 +21,9 @@ class_name CurveSessionState
 ## the cause of at least one bug fixed this session (the dirty badge
 ## not resetting).
 
-enum State { UNTRACKED, LOADED, DIRTY, COMMITTED }
+const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
 
-## STEAM_HOME_KEY equivalent for per_game_toggled_off(): the "Default"
-## profile has no context of its own, so it gets this sentinel key
-## instead of a real game/Steam Home name.
-const DEFAULT_PROFILE_CONTEXT_KEY := "__default__"
+enum State { UNTRACKED, LOADED, DIRTY, COMMITTED }
 
 ## state's parameter/var are deliberately untyped (not `: State`), even
 ## though this file is exactly where State is defined: OGUI loads
@@ -98,7 +95,7 @@ func apply_pressed() -> void:
 ## per-context curve to track anymore.
 func per_game_toggled_off() -> void:
 	state = State.LOADED
-	context_key = DEFAULT_PROFILE_CONTEXT_KEY
+	context_key = FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY
 	logger.debug("per_game_toggled_off()")
 	state_changed.emit(state, context_key)
 

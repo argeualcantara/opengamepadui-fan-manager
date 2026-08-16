@@ -16,7 +16,14 @@ const FanBackend = preload("res://plugins/fan-manager/core/backends/fan_backend.
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
 const HardwareWriteQueue = preload("res://plugins/fan-manager/core/utils/hardware_write_queue.gd")
 
-signal mode_changed(mode: String)
+## user_initiated distinguishes a real user action (the dropdown) from
+## a mode change that's a side effect of something else (restoring a
+## saved per-game context, reapplying the saved mode on boot) —
+## GameCurveManager uses this to decide whether to commit a
+## game_curves snapshot: without it, GameCurveManager._apply_context()
+## restoring a saved context's mode would immediately re-trigger a
+## commit for that same context, right after loading it.
+signal fan_mode_changed(mode: String, user_initiated: bool)
 
 const VALID_MODES := ["bios", "custom"]
 
@@ -85,7 +92,7 @@ func _adopt_current_hardware_mode() -> void:
 	if detected == "custom":
 		_adopt_current_custom_curve()
 
-	mode_changed.emit(detected)
+	fan_mode_changed.emit(detected, false)
 	logger.info(
 		"First run for hardware '%s': adopted current mode '%s' without writing pwm1_enable"
 		% [hardware_id, detected]
@@ -98,7 +105,11 @@ func _adopt_current_hardware_mode() -> void:
 ## the actual backend write happens on write_queue and is only logged
 ## if it fails. Returns false (and logs) only for an invalid mode or
 ## no backend.
-func set_mode(mode: String) -> bool:
+##
+## user_initiated (default false, safe-by-default: a call site that
+## doesn't think about this explicitly ends up not committing, never
+## spuriously committing) — see fan_mode_changed's doc comment.
+func set_mode(mode: String, user_initiated: bool = false) -> bool:
 	if not backend:
 		logger.error("Cannot set mode '%s': no fan backend available" % mode)
 		return false
@@ -113,7 +124,7 @@ func set_mode(mode: String) -> bool:
 	# (switching contexts never leaves Custom Mode), without this
 	# guard, _start_custom_mode() would reuse whichever curve is
 	# currently in memory (the previous context's) and briefly reapply
-	# it to hardware, and the resulting mode_changed emission would
+	# it to hardware, and the resulting fan_mode_changed emission would
 	# trigger a premature snapshot save with that stale curve, before
 	# the caller gets a chance to load the correct context's curve.
 	if mode == current_mode:
@@ -134,7 +145,7 @@ func set_mode(mode: String) -> bool:
 
 	current_mode = mode
 	_persist_active_mode(mode)
-	mode_changed.emit(mode)
+	fan_mode_changed.emit(mode, user_initiated)
 	logger.info("Switched fan mode from '%s' to '%s'" % [previous_mode, mode])
 	return true
 
@@ -174,9 +185,11 @@ func _ensure_curve_engine(fan_id: String) -> CustomCurveEngine:
 	return engine
 
 
-## Applies a curve to every fan reported by the backend. A saved
-## profile bundles one curve per fan_id; each engine gets only its own
-## slice.
+## Applies a curve to every fan reported by the backend, seeded from
+## the "__default__" game_curves context (FanCurveUtils.
+## GLOBAL_DEFAULT_CONTEXT_KEY) — the single shared curve GameCurveManager
+## also reads/writes whenever per-game tracking is off. Created here,
+## built-in balanced, the first time this ever runs for a hardware_id.
 func _start_custom_mode() -> void:
 	var fans := backend.list_fans()
 	if fans.is_empty():
@@ -184,44 +197,21 @@ func _start_custom_mode() -> void:
 		return
 
 	var data: Dictionary = store.load_data(hardware_id)
-	var active_profile = data.get("active_profile")
-	var profiles: Dictionary = data.get("profiles")
-	if profiles == null:
-		profiles = {}
-	logger.debug(
-		"_start_custom_mode(): fans=%s active_profile=%s known_profiles=%s"
-		% [fans, active_profile, profiles.keys()]
-	)
+	var game_curves: Dictionary = data.get("game_curves", {})
+	var default_entry: Dictionary = game_curves.get(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, {})
+	var default_curves: Dictionary = default_entry.get("curve", {})
+	logger.debug("_start_custom_mode(): fans=%s default_curves=%s" % [fans, default_curves.keys()])
 
-	var profile_curves: Dictionary = {}
-	var profile_name := ""
-
-	if active_profile != null and profiles.has(active_profile):
-		# Saved profiles are already aligned to the UI's fixed 10-point grid.
-		profile_curves = profiles[active_profile]
-		profile_name = active_profile
-	elif profiles.has(FanCurveUtils.DEFAULT_PROFILE_NAME):
-		profile_curves = profiles[FanCurveUtils.DEFAULT_PROFILE_NAME]
-		profile_name = FanCurveUtils.DEFAULT_PROFILE_NAME
-		_persist_active_profile(profile_name)
-		logger.info(
-			"No active profile set; falling back to '%s' for hardware '%s'"
-			% [profile_name, hardware_id]
-		)
-	else:
-		# No profiles yet: create the built-in balanced default,
+	if default_curves.is_empty():
+		# Nothing saved yet: create the built-in balanced default,
 		# applied identically to every fan.
 		for fan_id in fans:
-			profile_curves[fan_id] = FanCurveUtils.DEFAULT_BALANCED_CURVE.duplicate()
-		profile_name = FanCurveUtils.DEFAULT_PROFILE_NAME
-		store.save_profile(hardware_id, profile_name, profile_curves)
-		_persist_active_profile(profile_name)
+			default_curves[fan_id] = FanCurveUtils.DEFAULT_BALANCED_CURVE.duplicate()
+		store.set_game_curve(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, "custom", default_curves)
 		logger.info(
-			"Created built-in '%s' profile for hardware '%s'" % [profile_name, hardware_id]
+			"Created built-in default curve ('%s' context) for hardware '%s'"
+			% [FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, hardware_id]
 		)
-
-	if active_profile != null and profiles.has(active_profile):
-		logger.info("Applied profile '%s' for hardware '%s'" % [profile_name, hardware_id])
 
 	for fan_id in fans:
 		var engine := _ensure_curve_engine(fan_id)
@@ -230,8 +220,8 @@ func _start_custom_mode() -> void:
 		# round trip through another mode.
 		var curve: Dictionary = engine.get_curve()
 		if curve.is_empty():
-			curve = profile_curves.get(fan_id, FanCurveUtils.DEFAULT_BALANCED_CURVE.duplicate())
-			logger.debug("Fan '%s': no in-memory curve, seeding from profile/default" % fan_id)
+			curve = default_curves.get(fan_id, FanCurveUtils.DEFAULT_BALANCED_CURVE.duplicate())
+			logger.debug("Fan '%s': no in-memory curve, seeding from default/balanced" % fan_id)
 		else:
 			logger.debug("Fan '%s': reusing in-memory curve from previous session" % fan_id)
 
@@ -261,8 +251,3 @@ func _persist_active_mode(mode: String) -> void:
 	logger.debug("Persisting active_mode='%s' for hardware '%s'" % [mode, hardware_id])
 	store.load_data(hardware_id)
 	store.set_active_mode(mode)
-
-func _persist_active_profile(profile_name: String) -> void:
-	logger.debug("Persisting active_profile='%s' for hardware '%s'" % [profile_name, hardware_id])
-	store.load_data(hardware_id)
-	store.set_active_profile(profile_name)

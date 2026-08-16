@@ -108,14 +108,14 @@ func test_per_game_toggled_off_snaps_to_default_from_any_state() -> void:
 	session.per_game_toggled_off()
 
 	assert_eq(session.state, CurveSessionState.State.LOADED)
-	assert_eq(session.context_key, CurveSessionState.DEFAULT_PROFILE_CONTEXT_KEY)
+	assert_eq(session.context_key, FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY)
 
 
 func test_per_game_toggled_off_works_even_while_untracked() -> void:
 	session.per_game_toggled_off()
 
 	assert_eq(session.state, CurveSessionState.State.LOADED)
-	assert_eq(session.context_key, CurveSessionState.DEFAULT_PROFILE_CONTEXT_KEY)
+	assert_eq(session.context_key, FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY)
 
 
 func test_per_game_toggled_on_enters_loaded_with_given_context() -> void:

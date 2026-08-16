@@ -5,35 +5,32 @@ class_name FanCurveStore
 ##
 ## One JSON file per hardware_id under user://data/fan-manager/, held
 ## in memory as a single shared document once loaded (see load_data()).
-## Callers (FanModeManager, ProfileManagerPanel, GameCurveManager)
-## mutate it via the set_*() methods below, then call flush() once
-## their own top-level operation is done, see enqueue()/flush()'s doc
-## comments for why a mutation that needs to read some other object's
-## live state should go through enqueue() instead of a plain set_*()
-## call. Full schema:
+## Callers (FanModeManager, GameCurveManager) mutate it via the set_*()
+## methods below, then call flush() once their own top-level operation
+## is done, see enqueue()/flush()'s doc comments for why a mutation
+## that needs to read some other object's live state should go through
+## enqueue() instead of a plain set_*() call. Full schema:
 ## {
 ##   "hardware_id": "...",
 ##   "active_mode": "bios" | "custom",
-##   "active_profile": "<name>" | null,
-##   "profiles": {
-##     "<name>": { "<fan_id>": { "<temp>": <percent>, ... }, ... }, ...
-##   },
 ##   # Written by GameCurveManager. active_game_context is persisted on
 ##   # every app switch regardless of the toggle below; per_game_enabled
-##   # only once it's been changed; game_curves only while the toggle is on:
+##   # only once it's been changed; game_curves whenever a curve is
+##   # committed, under whichever context is active at the time
+##   # (FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY while the toggle is off):
 ##   "per_game_enabled": <bool>,
 ##   "active_game_context": "<context key>",
 ##   "game_curves": {
 ##     "<context key>": {
 ##       "mode": "bios" | "custom",
-##       "active_profile": "<name>" | null,
 ##       "curve": { "<fan_id>": { "<temp>": <percent>, ... }, ... }
 ##     }, ...
 ##   }
 ## }
-## <context key> is either "__steam_home__" (STEAM_HOME_KEY in
-## GameCurveManager, nothing running) or the running app's launch item
-## name, lowercased.
+## <context key> is "__default__" (FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY,
+## used whenever per-game tracking is off, or before any app has been
+## seen), "__steam_home__" (STEAM_HOME_KEY in GameCurveManager, nothing
+## running), or the running app's launch item name, lowercased.
 
 const DATA_DIR := "user://data/fan-manager"
 
@@ -139,16 +136,11 @@ func save(hardware_id: String, data: Dictionary) -> bool:
 
 ## --- In-memory mutators: no disk I/O, just update the shared cache. ---
 ## Callers must have already made this hardware_id current via
-## load_data() (FanModeManager/GameCurveManager/ProfileManagerPanel
-## all do this before mutating). Combine with a later flush() call to
-## actually persist.
+## load_data() (FanModeManager/GameCurveManager both do this before
+## mutating). Combine with a later flush() call to actually persist.
 
 func set_active_mode(mode: String) -> void:
 	_data["active_mode"] = mode
-
-
-func set_active_profile(profile_name) -> void:
-	_data["active_profile"] = profile_name
 
 
 func set_per_game_enabled(value: bool) -> void:
@@ -161,9 +153,9 @@ func set_active_game_context(context_key: String) -> void:
 	_data["active_game_context"] = context_key
 
 
-func set_game_curve(context_key: String, mode: String, active_profile, curve: Dictionary) -> void:
+func set_game_curve(context_key: String, mode: String, curve: Dictionary) -> void:
 	var game_curves: Dictionary = _data.get("game_curves", {})
-	game_curves[context_key] = {"mode": mode, "active_profile": active_profile, "curve": curve}
+	game_curves[context_key] = {"mode": mode, "curve": curve}
 	_data["game_curves"] = game_curves
 
 
@@ -195,83 +187,12 @@ func flush() -> bool:
 	return save(_hardware_id, _data)
 
 
-## Saves (creating or overwriting) a named curve profile for
-## hardware_id. Does not change active_mode/active_profile. Returns
-## false if name is empty.
-func save_profile(hardware_id: String, name: String, curve: Dictionary) -> bool:
-	if name.is_empty():
-		logger.error("Cannot save a profile with an empty name")
-		return false
-
-	logger.debug("save_profile('%s', '%s'): %s" % [hardware_id, name, curve])
-
-	var data := load_data(hardware_id)
-	var profiles: Dictionary = data.get("profiles")
-	if profiles == null:
-		profiles = {}
-
-	profiles[name] = curve
-	data["profiles"] = profiles
-
-	var saved := save(hardware_id, data)
-	if saved:
-		logger.info("Saved profile '%s' for hardware '%s'" % [name, hardware_id])
-	return saved
-
-
-## Deletes profile name for hardware_id. Clears active_profile if it
-## pointed at this profile. Returns false if the profile doesn't exist.
-func delete_profile(hardware_id: String, name: String) -> bool:
-	var data := load_data(hardware_id)
-	var profiles: Dictionary = data.get("profiles")
-
-	if profiles == null:
-		profiles = {}
-
-	if not profiles.has(name):
-		logger.warn("Cannot delete profile '%s': not found for hardware '%s'" % [name, hardware_id])
-		return false
-
-	profiles.erase(name)
-	data["profiles"] = profiles
-	var was_active: bool = data.get("active_profile") == name
-	if was_active:
-		data["active_profile"] = null
-
-	logger.debug(
-		"delete_profile('%s', '%s'): was_active=%s, %d profile(s) remaining"
-		% [hardware_id, name, was_active, profiles.size()]
-	)
-
-	var saved := save(hardware_id, data)
-	if saved:
-		logger.info("Deleted profile '%s' for hardware '%s'" % [name, hardware_id])
-	return saved
-
-
-## Returns the names of all saved profiles for hardware_id.
-func list_profiles(hardware_id: String) -> Array[String]:
-	var data := load_data(hardware_id)
-	var profiles: Dictionary = data.get("profiles")
-
-	if profiles == null:
-		profiles = {}
-
-	var names: Array[String] = []
-	for profile_name in profiles.keys():
-		names.append(profile_name)
-	logger.debug("list_profiles('%s') -> %s" % [hardware_id, names])
-	return names
-
-
 ## Returns a fresh, empty document for hardware_id (see the schema in
 ## the header comment).
 func _default_data(hardware_id: String) -> Dictionary:
 	return {
 		"hardware_id": hardware_id,
 		"active_mode": "bios",
-		"active_profile": null,
-		"profiles": {},
 	}
 
 

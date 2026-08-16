@@ -43,22 +43,22 @@ func set_mode(mode: String) -> bool:
 		logger.error("Cannot set mode '%s': no fan devices discovered" % mode)
 		return false
 
-	var enable_value: int
+	var enable_mode: int
 	match mode:
 		"bios":
-			enable_value = PwmEnable.AUTOMATIC
+			enable_mode = PwmEnable.AUTOMATIC
 		"custom":
-			enable_value = PwmEnable.MANUAL
+			enable_mode = PwmEnable.MANUAL
 		_:
 			logger.error("Unknown fan mode '%s'" % mode)
 			return false
 
-	logger.debug("set_mode('%s'): writing pwm_enable=%d to %s" % [mode, enable_value, fans])
+	logger.debug("set_mode('%s'): writing pwm_enable=%d to %s" % [mode, enable_mode, fans])
 
 	var failed_fans: Array[String] = []
 	for fan_id in fans:
 		var ch := _get_channel(fan_id)
-		if not ch or not _write_text(ch.enable_path, str(enable_value)):
+		if not ch or not _write_text(ch.pwm_enable_path, str(enable_mode)):
 			failed_fans.append(fan_id)
 
 	if not failed_fans.is_empty():
@@ -76,17 +76,17 @@ func get_current_mode() -> String:
 	if fans.is_empty():
 		return ""
 
-	var ch := _get_channel(fans[0])
-	if not ch:
+	var channel := _get_channel(fans[0])
+	if not channel:
 		return ""
-	var raw := PwmIo.read_text(ch.enable_path).strip_edges()
+	var pwm_enable_value := PwmIo.read_text(channel.pwm_enable_path).strip_edges()
 
 	var mode := ""
-	if raw == str(PwmEnable.MANUAL):
+	if pwm_enable_value == str(PwmEnable.MANUAL):
 		mode = "custom"
-	elif raw == str(PwmEnable.AUTOMATIC):
+	elif pwm_enable_value == str(PwmEnable.AUTOMATIC):
 		mode = "bios"
-	logger.debug("get_current_mode(): pwm_enable='%s' (from %s) -> '%s'" % [raw, fans[0], mode])
+	logger.debug("get_current_mode(): pwm_enable='%s' (from %s) -> '%s'" % [pwm_enable_value, fans[0], mode])
 	return mode
 
 
@@ -119,10 +119,10 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 		)
 		return true
 
-	var ch := _get_channel(fan_id)
-	if not ch:
+	var channel := _get_channel(fan_id)
+	if not channel:
 		return false
-	var wrote := _write_text(ch.points[0].fan_speed_path, str(pwm_value))
+	var wrote := _write_text(channel.points[0].fan_speed_path, str(pwm_value))
 	if wrote:
 		_last_written_pwm[fan_id] = pwm_value
 		logger.debug(
@@ -132,28 +132,28 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 
 
 func read_temperature(fan_id: String) -> float:
-	var ch := _get_channel(fan_id)
-	if not ch:
+	var channel := _get_channel(fan_id)
+	if not channel:
 		return -1.0
-	var raw := _read_text(ch.temp_sensor_path).strip_edges()
-	if raw.is_empty():
-		logger.warn("Unable to read temp%d_input for %s" % [ch.channel_id, fan_id])
+	var pwm_temp := _read_text(channel.readonly_temp_sensor_path).strip_edges()
+	if pwm_temp.is_empty():
+		logger.warn("Unable to read temp%d_input for %s" % [channel.channel_id, fan_id])
 		return -1.0
-	var celsius := raw.to_float() / 1000.0
-	logger.debug("read_temperature(%s) -> %.1f°C (raw='%s')" % [fan_id, celsius, raw])
+	var celsius := pwm_temp.to_float() / 1000.0
+	logger.debug("read_temperature(%s) -> %.1f°C (pwm_temp='%s')" % [fan_id, celsius, pwm_temp])
 	return celsius
 
 
 func read_fan_percent(fan_id: String) -> float:
-	var ch := _get_channel(fan_id)
-	if not ch:
+	var channel := _get_channel(fan_id)
+	if not channel:
 		return -1.0
-	var raw := _read_text(ch.fan_speed_readback_path).strip_edges()
-	if raw.is_empty():
-		logger.warn("Unable to read pwm%d for %s" % [ch.channel_id, fan_id])
+	var pwm_fan_speed := _read_text(channel.readonly_fan_speed_path).strip_edges()
+	if pwm_fan_speed.is_empty():
+		logger.warn("Unable to read pwm%d for %s" % [channel.channel_id, fan_id])
 		return -1.0
-	var percent := _pwm_to_percent(raw.to_int())
-	logger.debug("read_fan_percent(%s) -> %.1f%% (raw='%s')" % [fan_id, percent, raw])
+	var percent := _pwm_to_percent(pwm_fan_speed.to_int())
+	logger.debug("read_fan_percent(%s) -> %.1f%% (pwm_fan_speed='%s')" % [fan_id, percent, pwm_fan_speed])
 	return percent
 
 
@@ -171,46 +171,36 @@ func _get_or_discover_fans() -> Array[String]:
 
 	logger.debug("Discovering fans under %s" % HWMON_DIR)
 
-	var discovered: Array[String] = []
-	var dir := DirAccess.open(HWMON_DIR)
-	if not dir:
+	var hwmon_path_dir := DirAccess.open(HWMON_DIR)
+	if not hwmon_path_dir:
 		logger.warn("Unable to open %s" % HWMON_DIR)
-		return discovered
+		return _discovered_fans
 
 	# Logs every device considered, for debugging failed detection.
 	var seen: Array[String] = []
 
-	dir.list_dir_begin()
-	var entry := dir.get_next()
-	while entry != "":
-		if not entry.begins_with("."):
-			var device_path := HWMON_DIR + "/" + entry
+	hwmon_path_dir.list_dir_begin()
+	var hwmon_entry := hwmon_path_dir.get_next()
+	while hwmon_entry != "":
+		if not hwmon_entry.begins_with("."):
+			var device_path := HWMON_DIR + "/" + hwmon_entry
 			var pwm_channels := _find_channel_ids(device_path, "pwm%d_enable")
 			var temp_channels := _find_channel_ids(device_path, "temp%d_input")
-			seen.append(
-				"%s (pwm=%s temp=%s)" % [entry, pwm_channels, temp_channels]
-			)
+			seen.append("%s (pwm=%s temp=%s)" % [hwmon_entry, pwm_channels, temp_channels])
 
 			var channel_numbers := _resolve_fan_channels(pwm_channels, temp_channels)
 			var writable_channels := _writable_channels(device_path, channel_numbers)
-			logger.debug(
-				"%s: pwm_channels=%s temp_channels=%s -> resolved=%s -> writable=%s"
-				% [
-					device_path, pwm_channels, temp_channels, channel_numbers,
-					writable_channels.map(func(ch: PwmChannel) -> int: return ch.channel_id),
-				]
-			)
-			for ch in writable_channels:
-				_channels[ch.fan_id] = ch
-				discovered.append(ch.fan_id)
-		entry = dir.get_next()
-	dir.list_dir_end()
+			logger.debug("%s: pwm_channels=%s temp_channels=%s -> resolved=%s -> writable=%s" % [ device_path, pwm_channels, temp_channels, channel_numbers, writable_channels.map(func(ch: PwmChannel) -> int: return ch.channel_id),] )
+			for channel in writable_channels:
+				_channels[channel.fan_id] = channel
+				_discovered_fans.append(channel.fan_id)
+		hwmon_entry = hwmon_path_dir.get_next()
+	hwmon_path_dir.list_dir_end()
 
 	logger.info("Scanned %s: %s" % [HWMON_DIR, ", ".join(seen)])
-	if discovered.is_empty():
+	if _discovered_fans.is_empty():
 		logger.warn("No writable hwmon pwm<N>/pwm<N>_enable pair found")
 
-	_discovered_fans = discovered
 	return _discovered_fans
 
 
@@ -219,50 +209,47 @@ func _get_or_discover_fans() -> Array[String]:
 ## channel 1 (backward compatible with old single-fan saved profiles),
 ## "<device>#<channel>" otherwise.
 func _build_channel(device_path: String, channel_number: int) -> PwmChannel:
-	var ch := PwmChannel.new()
-	ch.hwmon_path = device_path
-	ch.channel_id = channel_number
-	ch.fan_id = (
+	var channel := PwmChannel.new()
+	channel.hwmon_path = device_path
+	channel.channel_id = channel_number
+	channel.fan_id = (
 		device_path if channel_number == 1 else "%s#%d" % [device_path, channel_number]
 	)
-	ch.enable_path = "%s/pwm%d_enable" % [device_path, channel_number]
-	ch.temp_sensor_path = "%s/temp%d_input" % [device_path, channel_number]
+	channel.pwm_enable_path = "%s/pwm%d_enable" % [device_path, channel_number]
+	channel.readonly_temp_sensor_path = "%s/temp%d_input" % [device_path, channel_number]
 
 	var point := PwmCurvePath.new()
-	point.temp_path = ch.temp_sensor_path
+	point.temp_path = channel.readonly_temp_sensor_path
 	point.fan_speed_path = "%s/pwm%d" % [device_path, channel_number]
-	ch.points = [point]
-	ch.fan_speed_readback_path = point.fan_speed_path
+	channel.points = [point]
+	channel.readonly_fan_speed_path = point.fan_speed_path
 
-	return ch
+	return channel
 
 
 ## Verifies if a given pwm channel actually has write permissions
-## if ch.enable_path or ch.points[0].fan_speed_path has no write
+## if ch.pwm_enable_path or ch.points[0].fan_speed_path has no write
 ## permissions returns false.
 func _writable_channels(device_path: String, channel_numbers: Array[int]) -> Array[PwmChannel]:
 	var writable: Array[PwmChannel] = []
 	for number in channel_numbers:
-		var ch := _build_channel(device_path, number)
-		if not PwmIo.is_writable(ch.enable_path):
+		var channel := _build_channel(device_path, number)
+		if not PwmIo.is_writable(channel.pwm_enable_path):
 			logger.debug("%s: pwm%d_enable not writable, dropping channel" % [device_path, number])
 			continue
-		if not PwmIo.is_writable(ch.points[0].fan_speed_path):
+		if not PwmIo.is_writable(channel.points[0].fan_speed_path):
 			logger.debug("%s: pwm%d not writable, dropping channel" % [device_path, number])
 			continue
-		writable.append(ch)
+		writable.append(channel)
 	return writable
 
 
-## Looks up the PwmChannel for fan_id, populating _channels first if
-## discovery hasn't run yet.
+## Looks up the PwmChannel for fan_id
 func _get_channel(fan_id: String) -> PwmChannel:
 	if _channels.is_empty():
 		_get_or_discover_fans()
-	var ch: PwmChannel = _channels.get(fan_id)
-	if not ch:
-		logger.warn("No discovered channel for fan_id '%s'" % fan_id)
-	return ch
+	var channel: PwmChannel = _channels.get(fan_id)
+	return channel
 
 
 ## Returns channel numbers (1..MAX_FAN_CHANNELS) for which
@@ -282,6 +269,7 @@ func _find_channel_ids(device_path: String, name_pattern: String) -> Array[int]:
 func _resolve_fan_channels(pwm_channels: Array[int], temp_channels: Array[int]) -> Array[int]:
 	if pwm_channels == temp_channels and pwm_channels.size() > 1:
 		return pwm_channels
+	# For cases where there is only 1 pwm and multiple temps
 	if 1 in pwm_channels and 1 in temp_channels:
 		return [1]
 	return []
@@ -290,17 +278,17 @@ func _resolve_fan_channels(pwm_channels: Array[int], temp_channels: Array[int]) 
 ## Switches fan_id to manual pwm control (pwm<N>_enable=1) if not
 ## already set, since writes are otherwise silently discarded.
 func _ensure_manual_mode(fan_id: String) -> bool:
-	var ch := _get_channel(fan_id)
-	if not ch:
+	var channel := _get_channel(fan_id)
+	if not channel:
 		return false
 
-	var raw := _read_text(ch.enable_path).strip_edges()
-	if raw == str(PwmEnable.MANUAL):
+	var pwm_enable_value := _read_text(channel.pwm_enable_path).strip_edges()
+	if pwm_enable_value == str(PwmEnable.MANUAL):
 		logger.debug("%s already in manual pwm control" % fan_id)
 		return true
 
 	logger.info("Switching %s to manual pwm control before applying custom curve" % fan_id)
-	return _write_text(ch.enable_path, str(PwmEnable.MANUAL))
+	return _write_text(channel.pwm_enable_path, str(PwmEnable.MANUAL))
 
 
 func _interpolate_curve(curve: Dictionary, temperature: float) -> float:

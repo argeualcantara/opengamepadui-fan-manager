@@ -40,25 +40,25 @@ var fan_label: String = ""
 
 ## pwm<N>_enable path: switches this channel between automatic
 ## (firmware/EC controlled) and manual (accepts written values).
-var enable_path: String = ""
+var pwm_enable_path: String = ""
 
 ## Live, read-only temperature sensor path (e.g. temp<N>_input),
 ## used by read_temperature() for display/reporting. Distinct from
 ## points[]'s temp_path: for AsusWmiFanBackend these are different
-## files (temp_sensor_path is a plain sensor reading; points[].temp_path
+## files (readonly_temp_sensor_path is a plain sensor reading; points[].temp_path
 ## is the writable temperature axis of the uploaded curve table).
 ## HwmonFanBackend's single point happens to reuse the same path for
 ## both, since it reads this sensor to interpolate the curve in
 ## software rather than uploading a hardware table.
-var temp_sensor_path: String = ""
+var readonly_temp_sensor_path: String = ""
 
 ## Live, read-only fan-speed readback path (e.g. bare pwm<N>), used by
 ## read_fan_percent() for display/reporting. Distinct from points[]'s
-## fan_speed_path for the same reason as temp_sensor_path above: for
+## fan_speed_path for the same reason as readonly_temp_sensor_path above: for
 ## AsusWmiFanBackend, this is a plain duty-cycle readback register,
 ## separate from any of the 8 curve-table points. HwmonFanBackend's
 ## single point reuses the same path here too, since pwm<N> is both
 ## where it writes the computed speed and where it reads it back.
-var fan_speed_readback_path: String = ""
+var readonly_fan_speed_path: String = ""
 
 var points: Array[PwmCurvePath] = []

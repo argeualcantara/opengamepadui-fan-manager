@@ -3,7 +3,6 @@
 [ext_resource type="Script" path="res://plugins/fan-manager/core/ui/mode_select_overlay.gd" id="1"]
 [ext_resource type="LabelSettings" path="res://assets/label/subheading_label.tres" id="3"]
 [ext_resource type="PackedScene" path="res://core/systems/input/focus_group.tscn" id="4"]
-[ext_resource type="PackedScene" path="res://plugins/fan-manager/core/ui/components/profile_manager_panel.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://core/ui/components/toggle.tscn" id="8"]
 [ext_resource type="PackedScene" path="res://core/ui/components/dropdown.tscn" id="9"]
 [ext_resource type="PackedScene" path="res://core/ui/components/card_button.tscn" id="10"]
@@ -107,11 +106,6 @@ theme_override_constants/margin_bottom = 12
 [node name="CustomEditorRoot" type="VBoxContainer" parent="CustomEditorSlot/CustomEditorMargin"]
 layout_mode = 2
 theme_override_constants/separation = 10
-
-[node name="ProfilesPanel" parent="CustomEditorSlot/CustomEditorMargin/CustomEditorRoot" instance=ExtResource("7")]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
 
 [node name="FanTabsBar" type="HBoxContainer" parent="CustomEditorSlot/CustomEditorMargin/CustomEditorRoot"]
 unique_name_in_owner = true

@@ -43,93 +43,29 @@ func test_load_returns_default_document_when_no_file_exists() -> void:
 
 	assert_eq(data["hardware_id"], hardware_id)
 	assert_eq(data["active_mode"], "bios")
-	assert_eq(data["active_profile"], null)
-	assert_eq(data["profiles"], {})
 
 
 func test_save_then_load_roundtrips_data() -> void:
 	var hardware_id := _track("gut-test-roundtrip")
 	var data := store.load_data(hardware_id)
 	data["active_mode"] = "custom"
-	data["active_profile"] = "Silencioso"
 
 	assert_true(store.save(hardware_id, data))
 
 	var reloaded := store.load_data(hardware_id)
 	assert_eq(reloaded["active_mode"], "custom")
-	assert_eq(reloaded["active_profile"], "Silencioso")
 
 
-func test_save_profile_adds_and_lists_it() -> void:
-	var hardware_id := _track("gut-test-save-profile")
+func test_set_game_curve_then_save_roundtrips_data() -> void:
+	var hardware_id := _track("gut-test-game-curve-roundtrip")
 	var curve := {"10": 0, "20": 0, "30": 20}
 
-	assert_true(store.save_profile(hardware_id, "Silencioso", curve))
-
-	var profiles := store.list_profiles(hardware_id)
-	assert_true(profiles.has("Silencioso"))
-
-	var data := store.load_data(hardware_id)
-	assert_eq(data["profiles"]["Silencioso"], curve)
-
-
-func test_save_profile_overwrites_existing_name_without_duplicating() -> void:
-	var hardware_id := _track("gut-test-overwrite-profile")
-
-	store.save_profile(hardware_id, "Perfil", {"10": 0})
-	store.save_profile(hardware_id, "Perfil", {"10": 50})
-
-	var profiles := store.list_profiles(hardware_id)
-	assert_eq(profiles.count("Perfil"), 1)
-
-	var data := store.load_data(hardware_id)
-	assert_eq(data["profiles"]["Perfil"], {"10": 50})
-
-
-func test_save_profile_rejects_empty_name() -> void:
-	var hardware_id := _track("gut-test-empty-name")
-	assert_false(store.save_profile(hardware_id, "", {"10": 0}))
-
-
-func test_delete_profile_removes_it() -> void:
-	var hardware_id := _track("gut-test-delete-profile")
-	store.save_profile(hardware_id, "Temporario", {"10": 0})
-
-	assert_true(store.delete_profile(hardware_id, "Temporario"))
-	assert_false(store.list_profiles(hardware_id).has("Temporario"))
-
-
-func test_delete_profile_clears_active_profile_if_it_was_active() -> void:
-	var hardware_id := _track("gut-test-delete-active-profile")
-	var data := store.load_data(hardware_id)
-	data["active_profile"] = "Ativo"
-	data["profiles"] = {"Ativo": {"10": 0}}
-	store.save(hardware_id, data)
-
-	store.delete_profile(hardware_id, "Ativo")
+	store.load_data(hardware_id)
+	store.set_game_curve("__default__", "custom", curve)
+	store.flush()
 
 	var reloaded := store.load_data(hardware_id)
-	assert_eq(reloaded["active_profile"], null)
-
-
-func test_delete_nonexistent_profile_returns_false() -> void:
-	var hardware_id := _track("gut-test-delete-missing")
-	assert_false(store.delete_profile(hardware_id, "NaoExiste"))
-
-
-func test_list_profiles_empty_when_none_saved() -> void:
-	var hardware_id := _track("gut-test-empty-profiles")
-	assert_eq(store.list_profiles(hardware_id), [])
-
-
-func test_different_hardware_ids_do_not_share_profiles() -> void:
-	var hardware_a := _track("gut-test-hardware-a")
-	var hardware_b := _track("gut-test-hardware-b")
-
-	store.save_profile(hardware_a, "SoNoA", {"10": 0})
-
-	assert_true(store.list_profiles(hardware_a).has("SoNoA"))
-	assert_false(store.list_profiles(hardware_b).has("SoNoA"))
+	assert_eq(reloaded["game_curves"]["__default__"], {"mode": "custom", "curve": curve})
 
 
 func test_sanitize_id_strips_unsafe_filename_characters() -> void:
