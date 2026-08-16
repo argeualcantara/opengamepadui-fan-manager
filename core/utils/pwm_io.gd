@@ -1,36 +1,32 @@
 extends RefCounted
 class_name PwmIo
 
-## Shared low-level helpers for talking to Linux pwm-style sysfs
-## interfaces (hwmon's pwm1, asus-wmi's pwm1_auto_point*, etc), so file
-## I/O and percent<->pwm conversion aren't duplicated across backends.
+# low level helpers for talking to linux pwm sysfs stuff (hwmon's pwm1,
+# asus-wmi's pwm1_auto_point*, etc) so file I/O and percent<->pwm math
+# isn't duplicated across backends
 
-## Safety switch, ON by default: while true, write_text() only logs
-## what it would write instead of touching the filesystem, and reports
-## success. Single choke point for every backend's writes. No UI
-## toggle yet, flip manually here once logged writes look correct.
+# safety switch, on by default - while true write_text() only logs what it
+# would write and pretends it succeeded, never touches the filesystem.
+# flip manually here once logged writes look right, no UI toggle for it yet.
 static var dry_run := true
 
 static var logger := Log.get_logger("FanManager PwmIo")
 
 static var has_permission := true
 
-## Converts a 0-100% fan speed to a 0-255 pwm duty-cycle value.
 static func percent_to_pwm(percent: float) -> int:
 	return clampi(roundi(clampf(percent, 0.0, 100.0) / 100.0 * 255.0), 0, 255)
 
 
-## Converts a 0-255 pwm duty-cycle value to a 0-100% fan speed.
 static func pwm_to_percent(pwm_value: int) -> float:
 	return clampf(float(pwm_value) / 255.0 * 100.0, 0.0, 100.0)
 
 
-## Reads a sysfs text file, returning "" on any failure (missing file,
-## permission denied, etc) or if the file is empty.
 static func read_text(path: String) -> String:
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
-		logger.debug("read_text('%s') failed: %s" % [path, error_string(FileAccess.get_open_error())])
+		var open_error = FileAccess.get_open_error()
+		logger.debug("read_text('%s') failed: %s" % [path, error_string(open_error)])
 		return ""
 	var bytes := PackedByteArray()
 
@@ -42,12 +38,10 @@ static func read_text(path: String) -> String:
 	return as_text
 
 
-## Writes text to a sysfs file. Tries a direct write first (works if
-## this process already has permission, e.g. a future udev rule); on
-## failure, falls back to the privileged helper (see
-## policy/fan-manager-priv-write@.service and policy/50-fan-manager.rules)
-## before giving up — the expected path in production, since these
-## sysfs attributes are root-owned and this plugin runs unprivileged.
+# tries a direct write first (works if we already have permission, e.g. a
+# future udev rule), falls back to the privileged helper service on
+# failure - that's the normal path in production since these sysfs files
+# are root-owned and this plugin runs unprivileged
 static func write_text(path: String, text: String) -> bool:
 	if dry_run:
 		logger.info("[DRY RUN] would write '%s' to %s" % [text, path])
@@ -59,38 +53,30 @@ static func write_text(path: String, text: String) -> bool:
 			logger.debug("write_text('%s', '%s') succeeded" % [path, text])
 			return true
 
+		var open_error = FileAccess.get_open_error()
 		logger.debug(
 			"write_text('%s') failed to open directly (%s), falling back to privileged helper"
-			% [path, error_string(FileAccess.get_open_error())]
+			% [path, error_string(open_error)]
 		)
 	has_permission = false
 	return _privileged_write(path, text)
 
 
-## Unit template installed by policy/fan-manager-priv-write@.service;
-## the instance packs "<systemd-escape(path)>@<systemd-escape(value)>"
-## (see that file's own header comment for the exact format and why
-## it exists instead of a plain pkexec call).
+# matches the unit template from policy/fan-manager-priv-write@.service,
+# instance is "<escaped path>@<escaped value>"
 const PRIV_WRITE_UNIT_TEMPLATE := "fan-manager-priv-write@%s.service"
 
-
-## Characters systemd-escape leaves unescaped (besides "/", which maps
-## to "-" below): letters, digits, ":", "_", ".". "-" itself is
-## deliberately NOT in this set even though it's otherwise a valid
-## unit-name character — it's reserved as the substitution target for
-## "/", so a literal "-" in the input has to be escaped too or it'd be
-## ambiguous with a "/". Matches systemd's own unit_name_escape().
+# chars systemd-escape leaves alone besides "/" (mapped to "-" below):
+# letters, digits, ":", "_", ".". "-" itself has to be escaped too even
+# though it'd normally be a valid unit-name char, since it's used as the
+# substitution target for "/".
 const _SYSTEMD_ESCAPE_SAFE_CHARS := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:_."
 
 
-## Reimplements `systemd-escape <value>` (no --path/--template) in
-## pure GDScript instead of shelling out to the real binary.
-## _privileged_write() calls this twice per write, and a single
-## "Apply" can trigger 30+ writes (8 curve points × 2 values × up to
-## 2 fans, plus pwm_enable) — spawning 2 extra processes per write on
-## top of the systemctl call itself was measurably freezing the UI
-## for several seconds on a real device. Every byte not in the safe
-## set (or "/" or "-") becomes "\xHH"; "/" becomes "-" directly.
+# reimplements `systemd-escape <value>` in gdscript instead of shelling out
+# - _privileged_write() calls this twice per write and a single Apply can
+# fire 30+ writes, spawning that many extra processes was noticeably
+# freezing the UI on real hardware
 static func _systemd_escape(value: String) -> String:
 	var result := ""
 	for byte in value.to_utf8_buffer():
@@ -104,9 +90,8 @@ static func _systemd_escape(value: String) -> String:
 	return result
 
 
-## Starts fan-manager-priv-write@<instance>.service (authorized
-## without a password by policy/50-fan-manager.rules) to perform the
-## write as root.
+# starts fan-manager-priv-write@<instance>.service (allowed without a
+# password by policy/50-fan-manager.rules) to do the write as root
 static func _privileged_write(path: String, text: String) -> bool:
 	var instance := _systemd_escape(path) + "@" + _systemd_escape(text)
 	var unit := PRIV_WRITE_UNIT_TEMPLATE % instance
@@ -119,20 +104,16 @@ static func _privileged_write(path: String, text: String) -> bool:
 	return true
 
 
-## Returns whether path exists at all, without opening it,  cheaper
-## than is_writable() for callers that only need to know a sysfs
-## attribute is present (e.g. probing how many hardware curve points a
-## device actually exposes), not that it's writable.
 static func path_exists(path: String) -> bool:
 	return FileAccess.file_exists(path)
 
 
-## Probes whether path can currently be opened for writing
 static func is_writable(path: String) -> bool:
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if not file:
+		var open_error = FileAccess.get_open_error()
 		logger.debug(
-			"is_writable('%s') -> false: %s" % [path, error_string(FileAccess.get_open_error())]
+			"is_writable('%s') -> false: %s" % [path, error_string(open_error)]
 		)
 		return false
 	file.close()

@@ -11,10 +11,9 @@ static var logger := Log.get_logger("FanManager FanCurveUtils")
 ## (10-100°C, step 10).
 const FIXED_TEMPERATURE_POINTS: Array[int] = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
-## Sentinel game_curves context key used whenever per-game tracking is
-## off, or before any app has been seen. FanModeManager seeds this
-## context's curve automatically the first time Custom Mode is entered
-## with nothing saved yet.
+# context key used when per-game tracking is off, or nothing's been seen
+# yet. FanModeManager fills this one in with the balanced curve the first
+# time custom mode gets turned on.
 const GLOBAL_DEFAULT_CONTEXT_KEY := "__default__"
 
 ## A gentle, generally-safe starting curve: silent at idle, ramping up

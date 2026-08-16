@@ -1,9 +1,5 @@
 extends Plugin
 
-## The types below are this plugin's own (FanBackendRegistry,
-## FanCurveStore, FanModeManager, ModeSelectOverlay, GameCurveManager,
-## AsusWmiFanBackend, HwmonFanBackend).
-
 const FanBackendRegistry = preload("res://plugins/fan-manager/core/backends/fan_backend_registry.gd")
 const FanCurveStore = preload("res://plugins/fan-manager/core/persistence/fan_curve_store.gd")
 const FanModeManager = preload("res://plugins/fan-manager/core/modes/fan_mode_manager.gd")
@@ -25,7 +21,7 @@ func _ready() -> void:
 	write_queue = HardwareWriteQueue.new()
 
 	registry = FanBackendRegistry.new()
-	# Vendor-specific backends first; registry.detect() tries them in order.
+	# vendor backends first, detect() tries them in this order
 	registry.register(AsusWmiFanBackend.new())
 	registry.register(HwmonFanBackend.new())
 
@@ -33,11 +29,12 @@ func _ready() -> void:
 	mode_manager = FanModeManager.new(registry, store, write_queue)
 	add_child(mode_manager)
 
-	mode_select_overlay = load(plugin_base + "/core/ui/mode_select_overlay.tscn").instantiate()
+	var overlay_scene = load(plugin_base + "/core/ui/mode_select_overlay.tscn")
+	mode_select_overlay = overlay_scene.instantiate()
 	mode_select_overlay.mode_manager = mode_manager
 	add_to_quick_bar(mode_select_overlay, null)
 
-	# Skipped if no backend was detected.
+	# skipped if no backend was detected
 	if mode_manager.backend:
 		var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
 		game_curve_manager = GameCurveManager.new(
@@ -49,11 +46,9 @@ func _ready() -> void:
 		add_child(game_curve_manager)
 		mode_select_overlay.bind_game_curve_manager(game_curve_manager)
 
-		# GameCurveManager._ready() (run synchronously by add_child() above)
-		# may already have loaded a per-game curve and emitted
-		# curve_applied before bind_game_curve_manager() connected this
-		# overlay to it, missing that signal. Force a resync so the UI
-		# reflects the actual engine state either way.
+		# GameCurveManager._ready() (already ran via add_child above) might
+		# have loaded a per-game curve and fired curve_applied before we
+		# connected to it just now, so force a resync here just in case
 		mode_select_overlay._on_curve_applied()
 
 		var data: Dictionary = store.load_data(mode_manager.hardware_id)
@@ -61,7 +56,8 @@ func _ready() -> void:
 
 
 func get_settings_menu() -> Control:
-	return load(plugin_base + "/core/settings_menu.tscn").instantiate()
+	var settings_scene = load(plugin_base + "/core/settings_menu.tscn")
+	return settings_scene.instantiate()
 
 
 func unload() -> void:
@@ -76,9 +72,8 @@ func unload() -> void:
 	if not mode_select_overlay:
 		return
 
-	# Free the whole QuickBarCard add_to_quick_bar() wrapped us in, not
-	# just mode_select_overlay, otherwise an empty card is left behind
-	# whose FocusGroupSetter still references the freed subtree.
+	# free the whole QuickBarCard, not just the overlay, otherwise an empty
+	# card is left behind pointing at the freed subtree
 	var card := _find_ancestor_of_type(mode_select_overlay, QuickBarCard)
 	if card:
 		card.queue_free()
@@ -89,7 +84,8 @@ func unload() -> void:
 func _find_ancestor_of_type(node: Node, type: Variant) -> Node:
 	var current := node.get_parent()
 	while current:
-		if is_instance_of(current, type):
+		var is_match = is_instance_of(current, type)
+		if is_match:
 			return current
 		current = current.get_parent()
 	return null

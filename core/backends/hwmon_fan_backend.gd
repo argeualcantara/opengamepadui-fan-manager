@@ -1,28 +1,24 @@
 extends "res://plugins/fan-manager/core/backends/fan_backend.gd"
 class_name HwmonFanBackend
 
-## Generic [FanBackend] fallback based on the Linux hwmon sysfs
-## interface (/sys/class/hwmon), used when no hardware-specific backend
-## recognizes the device. Single-fan devices use the bare hwmon device
-## path as fan_id; devices with matched pwm<N>/temp<N>_input pairs (e.g.
-## CPU+GPU handhelds) split into "<device path>#<channel>" fan_ids,
-## see _resolve_fan_channels().
-##
+# generic fallback backend using linux hwmon (/sys/class/hwmon), for when no
+# vendor-specific backend recognizes the device. single-fan devices just use
+# the hwmon device path as fan_id, devices with paired pwm<N>/temp<N>_input
+# (handhelds with cpu+gpu fans) get split into "<device path>#<channel>"
+# fan_ids, see _resolve_fan_channels()
 
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
 const PwmChannel = preload("res://plugins/fan-manager/core/models/pwm_channel.gd")
 const PwmCurvePath = preload("res://plugins/fan-manager/core/models/pwm_curve_path.gd")
 const HWMON_DIR := "/sys/class/hwmon"
-## Upper bound on channels to scan for.
 const MAX_FAN_CHANNELS := 4
 
-## pwm1_enable values, per the Linux hwmon sysfs-interface documentation.
+# pwm1_enable values from the linux hwmon sysfs docs
 enum PwmEnable { MANUAL = 1, AUTOMATIC = 2 }
 
 var _discovered_fans: Array[String] = []
 var _last_written_pwm: Dictionary = {}
 
-## fan_id -> PwmChannel, populated by _get_or_discover_fans().
 var _channels: Dictionary = {}
 
 
@@ -58,7 +54,11 @@ func set_mode(mode: String) -> bool:
 	var failed_fans: Array[String] = []
 	for fan_id in fans:
 		var ch := _get_channel(fan_id)
-		if not ch or not _write_text(ch.pwm_enable_path, str(enable_mode)):
+		if not ch:
+			failed_fans.append(fan_id)
+			continue
+		var wrote = _write_text(ch.pwm_enable_path, str(enable_mode))
+		if not wrote:
 			failed_fans.append(fan_id)
 
 	if not failed_fans.is_empty():
@@ -69,8 +69,7 @@ func set_mode(mode: String) -> bool:
 	return true
 
 
-## Returns "bios"/"custom"/"" based on the first discovered channel's
-## pwm_enable (every channel is kept in sync, so one is representative).
+# just checks the first discovered channel, they're all kept in sync
 func get_current_mode() -> String:
 	var fans := _get_or_discover_fans()
 	if fans.is_empty():
@@ -79,7 +78,8 @@ func get_current_mode() -> String:
 	var channel := _get_channel(fans[0])
 	if not channel:
 		return ""
-	var pwm_enable_value := PwmIo.read_text(channel.pwm_enable_path).strip_edges()
+	var pwm_enable_raw = PwmIo.read_text(channel.pwm_enable_path)
+	var pwm_enable_value := pwm_enable_raw.strip_edges()
 
 	var mode := ""
 	if pwm_enable_value == str(PwmEnable.MANUAL):
@@ -95,7 +95,8 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 		logger.warn("Cannot apply an empty custom curve to %s" % fan_id)
 		return false
 
-	if not _ensure_manual_mode(fan_id):
+	var manual_ok = _ensure_manual_mode(fan_id)
+	if not manual_ok:
 		logger.error(
 			"Cannot apply custom curve to %s: failed to switch pwm1_enable to manual" % fan_id
 		)
@@ -112,8 +113,9 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 		"apply_custom_curve(%s): temp=%.1f°C -> %.1f%% -> pwm=%d" % [fan_id, temperature, percent, pwm_value]
 	)
 
-	# Skip if the target hasn't changed since last time (runs every poll tick).
-	if _last_written_pwm.get(fan_id) == pwm_value:
+	# this runs every poll tick, skip the write if nothing changed
+	var last_pwm = _last_written_pwm.get(fan_id)
+	if last_pwm == pwm_value:
 		logger.debug(
 			"apply_custom_curve(%s): pwm=%d unchanged since last write, skipping" % [fan_id, pwm_value]
 		)
@@ -135,7 +137,8 @@ func read_temperature(fan_id: String) -> float:
 	var channel := _get_channel(fan_id)
 	if not channel:
 		return -1.0
-	var pwm_temp := _read_text(channel.readonly_temp_sensor_path).strip_edges()
+	var pwm_temp_raw = _read_text(channel.readonly_temp_sensor_path)
+	var pwm_temp := pwm_temp_raw.strip_edges()
 	if pwm_temp.is_empty():
 		logger.warn("Unable to read temp%d_input for %s" % [channel.channel_id, fan_id])
 		return -1.0
@@ -148,23 +151,21 @@ func read_fan_percent(fan_id: String) -> float:
 	var channel := _get_channel(fan_id)
 	if not channel:
 		return -1.0
-	var pwm_fan_speed := _read_text(channel.readonly_fan_speed_path).strip_edges()
+	var pwm_fan_speed_raw = _read_text(channel.readonly_fan_speed_path)
+	var pwm_fan_speed := pwm_fan_speed_raw.strip_edges()
 	if pwm_fan_speed.is_empty():
 		logger.warn("Unable to read pwm%d for %s" % [channel.channel_id, fan_id])
 		return -1.0
-	var percent := _pwm_to_percent(pwm_fan_speed.to_int())
+	var pwm_int = pwm_fan_speed.to_int()
+	var percent := _pwm_to_percent(pwm_int)
 	logger.debug("read_fan_percent(%s) -> %.1f%% (pwm_fan_speed='%s')" % [fan_id, percent, pwm_fan_speed])
 	return percent
 
 
-## Discovers hwmon devices exposing at least a matched pwm1/temp1_input
-## pair (see _resolve_fan_channels() for the multi-fan split), where
-## both pwm<N>_enable and pwm<N> are actually writable (see
-## _writable_channels()),  a channel that merely exists but can't be
-## written to isn't controllable, and reporting it as supported would
-## only surface as a failure later, at set_mode()/apply_custom_curve()
-## time. Cached once found; retried until then (hwmon may not be
-## populated yet this early in boot).
+# looks for hwmon devices with a matched pwm<N>/temp<N>_input pair that's
+# actually writable (existing but read-only channels would just fail later
+# at set_mode/apply_custom_curve time). cached once found, retried until
+# then since hwmon might not be populated yet this early in boot.
 func _get_or_discover_fans() -> Array[String]:
 	if not _discovered_fans.is_empty():
 		return _discovered_fans
@@ -176,7 +177,7 @@ func _get_or_discover_fans() -> Array[String]:
 		logger.warn("Unable to open %s" % HWMON_DIR)
 		return _discovered_fans
 
-	# Logs every device considered, for debugging failed detection.
+	# logged at the end, for debugging failed detection
 	var seen: Array[String] = []
 
 	hwmon_path_dir.list_dir_begin()
@@ -190,7 +191,8 @@ func _get_or_discover_fans() -> Array[String]:
 
 			var channel_numbers := _resolve_fan_channels(pwm_channels, temp_channels)
 			var writable_channels := _writable_channels(device_path, channel_numbers)
-			logger.debug("%s: pwm_channels=%s temp_channels=%s -> resolved=%s -> writable=%s" % [ device_path, pwm_channels, temp_channels, channel_numbers, writable_channels.map(func(ch: PwmChannel) -> int: return ch.channel_id),] )
+			var writable_ids = writable_channels.map(func(ch: PwmChannel) -> int: return ch.channel_id)
+			logger.debug("%s: pwm_channels=%s temp_channels=%s -> resolved=%s -> writable=%s" % [device_path, pwm_channels, temp_channels, channel_numbers, writable_ids])
 			for channel in writable_channels:
 				_channels[channel.fan_id] = channel
 				_discovered_fans.append(channel.fan_id)
@@ -204,10 +206,8 @@ func _get_or_discover_fans() -> Array[String]:
 	return _discovered_fans
 
 
-## Builds a PwmChannel for device_path/channel_number, resolving
-## fan_id per this backend's own id convention: bare device path for
-## channel 1 (backward compatible with old single-fan saved profiles),
-## "<device>#<channel>" otherwise.
+# channel 1 keeps using the bare device path as fan_id, for backward compat
+# with old single-fan saved profiles. anything else gets "<device>#<channel>"
 func _build_channel(device_path: String, channel_number: int) -> PwmChannel:
 	var channel := PwmChannel.new()
 	channel.hwmon_path = device_path
@@ -227,24 +227,22 @@ func _build_channel(device_path: String, channel_number: int) -> PwmChannel:
 	return channel
 
 
-## Verifies if a given pwm channel actually has write permissions
-## if ch.pwm_enable_path or ch.points[0].fan_speed_path has no write
-## permissions returns false.
 func _writable_channels(device_path: String, channel_numbers: Array[int]) -> Array[PwmChannel]:
 	var writable: Array[PwmChannel] = []
 	for number in channel_numbers:
 		var channel := _build_channel(device_path, number)
-		if not PwmIo.is_writable(channel.pwm_enable_path):
+		var enable_writable = PwmIo.is_writable(channel.pwm_enable_path)
+		if not enable_writable:
 			logger.debug("%s: pwm%d_enable not writable, dropping channel" % [device_path, number])
 			continue
-		if not PwmIo.is_writable(channel.points[0].fan_speed_path):
+		var speed_writable = PwmIo.is_writable(channel.points[0].fan_speed_path)
+		if not speed_writable:
 			logger.debug("%s: pwm%d not writable, dropping channel" % [device_path, number])
 			continue
 		writable.append(channel)
 	return writable
 
 
-## Looks up the PwmChannel for fan_id
 func _get_channel(fan_id: String) -> PwmChannel:
 	if _channels.is_empty():
 		_get_or_discover_fans()
@@ -252,37 +250,36 @@ func _get_channel(fan_id: String) -> PwmChannel:
 	return channel
 
 
-## Returns channel numbers (1..MAX_FAN_CHANNELS) for which
-## "<device_path>/<name_pattern % N>"
 func _find_channel_ids(device_path: String, name_pattern: String) -> Array[int]:
 	var channels: Array[int] = []
 	for channel in range(1, MAX_FAN_CHANNELS + 1):
-		if not FileAccess.file_exists(device_path + "/" + (name_pattern % channel)):
+		var channel_path = device_path + "/" + (name_pattern % channel)
+		var exists = FileAccess.file_exists(channel_path)
+		if not exists:
 			break
 		channels.append(channel)
 	return channels
 
 
-## Splits into multiple fans only when pwm_channels and temp_channels
-## are the exact same set (no reliable way to pair them otherwise).
-## Falls back to channel 1 only in any ambiguous case.
+# only splits into multiple fans when pwm_channels and temp_channels are the
+# exact same set, no reliable way to pair them otherwise. falls back to
+# channel 1 in any ambiguous case.
 func _resolve_fan_channels(pwm_channels: Array[int], temp_channels: Array[int]) -> Array[int]:
 	if pwm_channels == temp_channels and pwm_channels.size() > 1:
 		return pwm_channels
-	# For cases where there is only 1 pwm and multiple temps
+	# only 1 pwm but multiple temps case
 	if 1 in pwm_channels and 1 in temp_channels:
 		return [1]
 	return []
 
 
-## Switches fan_id to manual pwm control (pwm<N>_enable=1) if not
-## already set, since writes are otherwise silently discarded.
 func _ensure_manual_mode(fan_id: String) -> bool:
 	var channel := _get_channel(fan_id)
 	if not channel:
 		return false
 
-	var pwm_enable_value := _read_text(channel.pwm_enable_path).strip_edges()
+	var pwm_enable_raw = _read_text(channel.pwm_enable_path)
+	var pwm_enable_value := pwm_enable_raw.strip_edges()
 	if pwm_enable_value == str(PwmEnable.MANUAL):
 		logger.debug("%s already in manual pwm control" % fan_id)
 		return true

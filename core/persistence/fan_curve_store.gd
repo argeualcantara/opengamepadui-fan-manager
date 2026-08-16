@@ -1,72 +1,50 @@
 extends RefCounted
 class_name FanCurveStore
 
-## Persists fan mode/curve configuration per hardware.
-##
-## One JSON file per hardware_id under user://data/fan-manager/, held
-## in memory as a single shared document once loaded (see load_data()).
-## Callers (FanModeManager, GameCurveManager) mutate it via the set_*()
-## methods below, then call flush() once their own top-level operation
-## is done, see enqueue()/flush()'s doc comments for why a mutation
-## that needs to read some other object's live state should go through
-## enqueue() instead of a plain set_*() call. Full schema:
-## {
-##   "hardware_id": "...",
-##   "active_mode": "bios" | "custom",
-##   # Written by GameCurveManager. active_game_context is persisted on
-##   # every app switch regardless of the toggle below; per_game_enabled
-##   # only once it's been changed; game_curves whenever a curve is
-##   # committed, under whichever context is active at the time
-##   # (FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY while the toggle is off):
-##   "per_game_enabled": <bool>,
-##   "active_game_context": "<context key>",
-##   "game_curves": {
-##     "<context key>": {
-##       "mode": "bios" | "custom",
-##       "curve": { "<fan_id>": { "<temp>": <percent>, ... }, ... }
-##     }, ...
-##   }
-## }
-## <context key> is "__default__" (FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY,
-## used whenever per-game tracking is off, or before any app has been
-## seen), "__steam_home__" (STEAM_HOME_KEY in GameCurveManager, nothing
-## running), or the running app's launch item name, lowercased.
+# saves fan mode/curve config per hardware, one json file under
+# user://data/fan-manager/. kept in memory once loaded (load_data()),
+# callers mutate it with the set_*() below then call flush() when done.
+#
+# schema:
+# {
+#   "hardware_id": "...",
+#   "active_mode": "bios" | "custom",
+#   "per_game_enabled": <bool>,
+#   "active_game_context": "<context key>",
+#   "game_curves": {
+#     "<context key>": {
+#       "mode": "bios" | "custom",
+#       "curve": { "<fan_id>": { "<temp>": <percent>, ... }, ... }
+#     }, ...
+#   }
+# }
+# context key is "__default__" (per-game off, or nothing seen yet),
+# "__steam_home__" (nothing running), or the app's name lowercased.
 
 const DATA_DIR := "user://data/fan-manager"
 
 var logger := Log.get_logger("FanManager FanCurveStore")
 
-## In-memory copy of the document for the last hardware_id passed to
-## load_data(): every call site now shares this same Dictionary
-## instance (Dictionary is a reference type in GDScript), so a mutator
-## call below is visible to every other holder immediately, without a
-## disk round-trip. Only flush() actually touches disk.
+# same dictionary instance shared by everyone who calls load_data() for this
+# hardware_id, so mutating it is visible everywhere without touching disk.
+# only flush() actually writes.
 var _data: Dictionary = {}
 var _hardware_id: String = ""
 
-## Mutations queued via enqueue(), drained by flush(). A queued
-## Callable is not run until flush() calls it, so a job that reads
-## "live" state (e.g. a CustomCurveEngine's current curve) always sees
-## whatever that state has settled to by the time flush() actually
-## runs, never a mid-transaction snapshot of it. See flush()'s doc
-## comment for why this matters.
+# jobs queued with enqueue(), run when flush() drains them - so a job that
+# reads some other object's live state (like an engine's current curve)
+# always sees it as it stands at the end, not mid-operation.
 var _jobs: Array[Callable] = []
 var _draining := false
 
 
-## Returns true if a document has already been saved for hardware_id
-## (vs. a genuinely first run).
 func exists(hardware_id: String) -> bool:
-	var result := FileAccess.file_exists(_path_for(hardware_id))
+	var path = _path_for(hardware_id)
+	var result := FileAccess.file_exists(path)
 	logger.debug("exists('%s') -> %s" % [hardware_id, result])
 	return result
 
 
-## Returns the in-memory document for hardware_id, loading it from
-## disk (or a fresh default) the first time it's requested. Every
-## caller gets the same shared Dictionary instance: mutating it (or
-## calling one of the set_*() mutators below) is immediately visible
-## to every other caller, with no disk I/O until flush().
 func load_data(hardware_id: String) -> Dictionary:
 	if _hardware_id == hardware_id and not _data.is_empty():
 		return _data
@@ -79,7 +57,8 @@ func load_data(hardware_id: String) -> Dictionary:
 func _read_from_disk(hardware_id: String) -> Dictionary:
 	var path := _path_for(hardware_id)
 
-	if not FileAccess.file_exists(path):
+	var file_exists = FileAccess.file_exists(path)
+	if not file_exists:
 		logger.debug("load_data('%s'): %s doesn't exist yet, returning defaults" % [hardware_id, path])
 		return _default_data(hardware_id)
 
@@ -98,10 +77,8 @@ func _read_from_disk(hardware_id: String) -> Dictionary:
 	return parsed as Dictionary
 
 
-## Writes data for hardware_id atomically (temp file + rename) so a
-## crash mid-write can't leave a corrupt file. Returns true on success.
-## Also (re)adopts data as the in-memory cache for hardware_id, so a
-## subsequent load_data()/mutator call sees exactly what was written.
+# writes atomically (temp file + rename) so a crash mid-write can't leave a
+# corrupt file
 func save(hardware_id: String, data: Dictionary) -> bool:
 	_hardware_id = hardware_id
 	_data = data
@@ -121,8 +98,9 @@ func save(hardware_id: String, data: Dictionary) -> bool:
 		logger.error("Unable to open %s for writing" % tmp_path)
 		return false
 
-	file.store_string(JSON.stringify(data, "\t"))
-	file = null  # close/flush before renaming, so the rename is atomic-safe
+	var json_text = JSON.stringify(data, "\t")
+	file.store_string(json_text)
+	file = null  # close it before renaming
 
 	var rename_err := DirAccess.rename_absolute(tmp_path, path)
 	if rename_err != OK:
@@ -134,10 +112,8 @@ func save(hardware_id: String, data: Dictionary) -> bool:
 	return true
 
 
-## --- In-memory mutators: no disk I/O, just update the shared cache. ---
-## Callers must have already made this hardware_id current via
-## load_data() (FanModeManager/GameCurveManager both do this before
-## mutating). Combine with a later flush() call to actually persist.
+# --- in-memory mutators, no disk I/O. caller needs to have called
+# load_data() first, then flush() when they're actually done. ---
 
 func set_active_mode(mode: String) -> void:
 	_data["active_mode"] = mode
@@ -159,23 +135,13 @@ func set_game_curve(context_key: String, mode: String, curve: Dictionary) -> voi
 	_data["game_curves"] = game_curves
 
 
-## Queues job to run later, inside flush(), instead of immediately.
-## Use this instead of a mutator directly whenever job needs to read
-## some other object's "current" state (e.g. a CustomCurveEngine's
-## live curve): since job only runs when flush() drains the queue,
-## it's guaranteed to see that state as it stands at the end of
-## whatever larger operation is under way, never mid-way through it.
 func enqueue(job: Callable) -> void:
 	_jobs.append(job)
 
 
-## Runs every queued job in FIFO order, then writes the resulting
-## in-memory document to disk once. Call this exactly once, at the
-## very end of a top-level operation (a mode switch, a saved-context
-## restore, a profile save), never from a step in the middle of one,
-## or a job enqueued earlier in that same operation would still be
-## read too early. Re-entrant calls (a job that itself calls flush())
-## are ignored; the outer call finishes the drain.
+# runs every queued job then writes to disk once. call this exactly once at
+# the end of whatever you're doing, not in the middle - otherwise a job
+# queued earlier in the same operation would get read too soon.
 func flush() -> bool:
 	if _draining:
 		return false
@@ -187,8 +153,6 @@ func flush() -> bool:
 	return save(_hardware_id, _data)
 
 
-## Returns a fresh, empty document for hardware_id (see the schema in
-## the header comment).
 func _default_data(hardware_id: String) -> Dictionary:
 	return {
 		"hardware_id": hardware_id,
@@ -196,21 +160,20 @@ func _default_data(hardware_id: String) -> Dictionary:
 	}
 
 
-## Returns the JSON file path on disk for hardware_id.
 func _path_for(hardware_id: String) -> String:
 	return "%s/%s.json" % [DATA_DIR, _sanitize_id(hardware_id)]
 
 
-## hardware_id values are derived from free-form hardware strings (e.g.
-## DMI product/board names) and may contain spaces, slashes, or other
-## characters unsafe for a filename. Anything outside [A-Za-z0-9_-] is
-## replaced with "_".
+# hardware_id comes from stuff like DMI product/board names, can have
+# spaces/slashes/whatever, not safe as a filename. strip anything not
+# alphanumeric/underscore/dash.
 func _sanitize_id(hardware_id: String) -> String:
 	var sanitized := ""
 	var allowed := "abcdefghijklmnopqrstuvwxyz0123456789_-"
 	for i in hardware_id.length():
 		var c := hardware_id[i]
-		if allowed.contains(c.to_lower()):
+		var c_lower = c.to_lower()
+		if allowed.contains(c_lower):
 			sanitized += c
 		else:
 			sanitized += "_"

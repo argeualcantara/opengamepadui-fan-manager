@@ -3,8 +3,8 @@ class_name HardwareId
 
 const PwmIo = preload("res://plugins/fan-manager/core/utils/pwm_io.gd")
 
-## Shared hardware identification helper: ensures every FanBackend
-## produces the same hardware_id for the same physical machine.
+# makes sure every FanBackend produces the same hardware_id for the same
+# physical machine
 
 const UNKNOWN := "unknown-hardware"
 
@@ -12,12 +12,12 @@ const DMI_PRODUCT_NAME := "/sys/class/dmi/id/product_name"
 const DMI_BOARD_NAME := "/sys/class/dmi/id/board_name"
 
 
-## Returns a stable id derived from DMI product/board name, or
-## [constant UNKNOWN] if neither is readable.
 static func from_dmi() -> String:
 	var logger := Log.get_logger("FanManager HardwareId")
-	var product := _read_text(DMI_PRODUCT_NAME).strip_edges()
-	var board := _read_text(DMI_BOARD_NAME).strip_edges()
+	var product_raw = _read_text(DMI_PRODUCT_NAME)
+	var product := product_raw.strip_edges()
+	var board_raw = _read_text(DMI_BOARD_NAME)
+	var board := board_raw.strip_edges()
 	logger.debug(
 		"Read DMI: %s='%s' %s='%s'"
 		% [DMI_PRODUCT_NAME, product, DMI_BOARD_NAME, board]

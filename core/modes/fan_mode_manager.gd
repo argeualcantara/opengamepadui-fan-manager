@@ -1,13 +1,8 @@
 extends Node
 class_name FanModeManager
 
-## Orchestrates switching between BIOS and Custom fan modes: detects
-## the active FanBackend, stops the previous mode's activity before
-## applying the new one, persists the active mode, and reapplies it on
-## startup.
-##
-## Referenced via preload()'d consts, not bare class_name lookups: see
-## hwmon_fan_backend.gd's header comment for why.
+# switches between bios/custom fan mode, stops the old mode before starting
+# the new one, persists it, reapplies on startup.
 
 const FanBackendRegistry = preload("res://plugins/fan-manager/core/backends/fan_backend_registry.gd")
 const FanCurveStore = preload("res://plugins/fan-manager/core/persistence/fan_curve_store.gd")
@@ -16,13 +11,9 @@ const FanBackend = preload("res://plugins/fan-manager/core/backends/fan_backend.
 const FanCurveUtils = preload("res://plugins/fan-manager/core/persistence/fan_curve_utils.gd")
 const HardwareWriteQueue = preload("res://plugins/fan-manager/core/utils/hardware_write_queue.gd")
 
-## user_initiated distinguishes a real user action (the dropdown) from
-## a mode change that's a side effect of something else (restoring a
-## saved per-game context, reapplying the saved mode on boot) —
-## GameCurveManager uses this to decide whether to commit a
-## game_curves snapshot: without it, GameCurveManager._apply_context()
-## restoring a saved context's mode would immediately re-trigger a
-## commit for that same context, right after loading it.
+# user_initiated = a real dropdown pick, vs us restoring a saved mode on
+# boot or for a per-game context. GameCurveManager uses this to know when
+# to actually save.
 signal fan_mode_changed(mode: String, user_initiated: bool)
 
 const VALID_MODES := ["bios", "custom"]
@@ -33,8 +24,6 @@ var registry: FanBackendRegistry
 var store: FanCurveStore
 var write_queue: HardwareWriteQueue
 
-## One CustomCurveEngine per fan_id, created lazily as fans are
-## discovered.
 var curve_engines: Dictionary = {}
 
 var backend: FanBackend
@@ -57,9 +46,9 @@ func _ready() -> void:
 	hardware_id = backend.get_hardware_id()
 	logger.debug("Using backend '%s' for hardware '%s'" % [backend.get_script().get_global_name(), hardware_id])
 
-	if not store.exists(hardware_id):
-		# First run for this hardware: adopt whatever mode it's already
-		# in instead of writing an assumed default.
+	var already_exists = store.exists(hardware_id)
+	if not already_exists:
+		# first run for this hardware, just adopt whatever it's already doing
 		_adopt_current_hardware_mode()
 		store.flush()
 		return
@@ -68,7 +57,8 @@ func _ready() -> void:
 	var saved_mode: String = data.get("active_mode", "bios")
 	logger.debug("Reapplying saved mode '%s' on startup" % saved_mode)
 
-	if not set_mode(saved_mode):
+	var applied_ok = set_mode(saved_mode)
+	if not applied_ok:
 		logger.warn(
 			"Failed to reapply saved mode '%s' on startup, falling back to bios" % saved_mode
 		)
@@ -86,9 +76,8 @@ func _adopt_current_hardware_mode() -> void:
 	current_mode = detected
 	_persist_active_mode(detected)
 
-	# Not _start_custom_mode(): that creates the built-in "Default"
-	# profile, overwriting the hardware's existing curve. Read back
-	# what's actually active instead.
+	# not _start_custom_mode() here, that would overwrite the hardware's
+	# existing curve with the built-in default. just read back what's active.
 	if detected == "custom":
 		_adopt_current_custom_curve()
 
@@ -99,16 +88,6 @@ func _adopt_current_hardware_mode() -> void:
 	)
 
 
-## Switches to the given mode ("bios" or "custom"), cleanly stopping
-## the previous mode's activity first. Persists the new mode
-## optimistically and returns true as soon as the switch is queued;
-## the actual backend write happens on write_queue and is only logged
-## if it fails. Returns false (and logs) only for an invalid mode or
-## no backend.
-##
-## user_initiated (default false, safe-by-default: a call site that
-## doesn't think about this explicitly ends up not committing, never
-## spuriously committing) — see fan_mode_changed's doc comment.
 func set_mode(mode: String, user_initiated: bool = false) -> bool:
 	if not backend:
 		logger.error("Cannot set mode '%s': no fan backend available" % mode)
@@ -118,15 +97,9 @@ func set_mode(mode: String, user_initiated: bool = false) -> bool:
 		logger.error("Unknown fan mode '%s'" % mode)
 		return false
 
-	# Already in this mode: skip the stop/restart cycle entirely. This
-	# matters for GameCurveManager, which calls set_mode("custom") to
-	# restore a per-context config even when already in Custom Mode
-	# (switching contexts never leaves Custom Mode), without this
-	# guard, _start_custom_mode() would reuse whichever curve is
-	# currently in memory (the previous context's) and briefly reapply
-	# it to hardware, and the resulting fan_mode_changed emission would
-	# trigger a premature snapshot save with that stale curve, before
-	# the caller gets a chance to load the correct context's curve.
+	# already there, skip the whole stop/restart dance. needed because
+	# GameCurveManager calls set_mode("custom") to restore a per-game context
+	# even while already in custom mode.
 	if mode == current_mode:
 		logger.debug("set_mode('%s'): already in this mode" % mode)
 		return true
@@ -134,7 +107,6 @@ func set_mode(mode: String, user_initiated: bool = false) -> bool:
 	var previous_mode := current_mode if not current_mode.is_empty() else "(none)"
 	logger.debug("set_mode('%s'): stopping %d curve engine(s) from previous mode '%s'" % [mode, curve_engines.size(), previous_mode])
 
-	# Stop the previous mode's activity before touching the backend.
 	for engine in curve_engines.values():
 		engine.stop()
 
@@ -150,13 +122,11 @@ func set_mode(mode: String, user_initiated: bool = false) -> bool:
 	return true
 
 
-## Queues backend.set_mode(mode), keyed "mode" so rapid switches
-## coalesce instead of running concurrently. Falls back to a
-## synchronous call if no write_queue is set.
 func _queue_backend_mode_write(mode: String) -> void:
 	var backend_ref := backend
 	var job := func():
-		if not backend_ref.set_mode(mode):
+		var write_ok = backend_ref.set_mode(mode)
+		if not write_ok:
 			logger.error("Backend failed to switch to mode '%s'" % mode)
 
 	if write_queue:
@@ -185,19 +155,12 @@ func _ensure_curve_engine(fan_id: String) -> CustomCurveEngine:
 	return engine
 
 
-## Applies a curve to every fan reported by the backend, seeded from
-## the "__default__" game_curves context (FanCurveUtils.
-## GLOBAL_DEFAULT_CONTEXT_KEY) — the single shared curve GameCurveManager
-## also reads/writes whenever per-game tracking is off. Created here,
-## built-in balanced, the first time this ever runs for a hardware_id —
-## but only persisted to disk while per-game tracking is off (read
-## straight from the store's own JSON cache, not injected: FanModeManager
-## otherwise has no dependency on GameCurveManager/per-game state on
-## purpose). While per-game is on, "__default__" isn't the context
-## GameCurveManager reads/writes (see its doc comment), so persisting it
-## here would just create an orphaned entry nothing reads until per-game
-## gets toggled off again; the fallback curve is still built in memory
-## either way, to seed the engines below.
+# seeds every fan from the shared "__default__" game_curves entry, creating
+# it with the balanced curve the first time this ever runs. only writes it
+# to disk when per-game tracking is off though - checked straight from the
+# json cache, we don't want a dependency on GameCurveManager here. while
+# per-game is on nobody reads "__default__" anyway, so writing it would just
+# leave a dead entry around.
 func _start_custom_mode() -> void:
 	var fans := backend.list_fans()
 	if fans.is_empty():
@@ -215,8 +178,6 @@ func _start_custom_mode() -> void:
 	)
 
 	if default_curves.is_empty():
-		# Nothing saved yet: build the built-in balanced default,
-		# applied identically to every fan.
 		for fan_id in fans:
 			default_curves[fan_id] = FanCurveUtils.DEFAULT_BALANCED_CURVE.duplicate()
 		if per_game_enabled:
@@ -231,8 +192,8 @@ func _start_custom_mode() -> void:
 	for fan_id in fans:
 		var engine := _ensure_curve_engine(fan_id)
 
-		# Reuse in-memory curve on re-entry so unsaved edits survive a
-		# round trip through another mode.
+		# keep whatever's already loaded so unsaved edits survive a trip
+		# through another mode
 		var curve: Dictionary = engine.get_curve()
 		if curve.is_empty():
 			curve = default_curves.get(fan_id, FanCurveUtils.DEFAULT_BALANCED_CURVE.duplicate())
@@ -243,25 +204,19 @@ func _start_custom_mode() -> void:
 		engine.start(backend, fan_id, curve)
 
 
-## Used by _adopt_current_hardware_mode() when the hardware was already
-## in custom mode before the plugin ran. Reads back the curve actually
-## active per fan, without creating/using the "Default" profile.
 func _adopt_current_custom_curve() -> void:
 	var fans := backend.list_fans()
 	if fans.is_empty():
 		return
 
 	for fan_id in fans:
-		var curve := FanCurveUtils.resample_to_fixed_points(backend.get_bios_curve(fan_id))
+		var bios_curve = backend.get_bios_curve(fan_id)
+		var curve := FanCurveUtils.resample_to_fixed_points(bios_curve)
 		logger.debug("_adopt_current_custom_curve(): fan '%s' -> %s" % [fan_id, curve])
 		var engine := _ensure_curve_engine(fan_id)
 		engine.start(backend, fan_id, curve)
 
 
-## In-memory only, no disk write here. Callers (_ready(),
-## _apply_context() via GameCurveManager, ModeSelectOverlay) are
-## responsible for calling store.flush() once their own top-level
-## operation is fully done.
 func _persist_active_mode(mode: String) -> void:
 	logger.debug("Persisting active_mode='%s' for hardware '%s'" % [mode, hardware_id])
 	store.load_data(hardware_id)

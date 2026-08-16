@@ -1,19 +1,15 @@
 extends RefCounted
 class_name HardwareWriteQueue
 
-## Serializes hardware writes through one shared background thread,
-## coalescing by key so a newer submit for the same key replaces an
-## unstarted one instead of queuing up, while different keys never
-## drop each other.
+# runs hardware writes on one shared background thread, coalesced by key -
+# a newer submit for the same key replaces an unstarted one instead of
+# piling up, different keys don't step on each other
 
 var _busy: bool = false
 var _pending_jobs: Dictionary = {}
 var _thread: Thread
 
 
-## Runs job on the shared thread now, or as soon as the current job
-## finishes if one is already running. A second submit with the same
-## key before that job starts replaces it.
 func submit(key: String, job: Callable) -> void:
 	if _busy:
 		_pending_jobs[key] = job
@@ -23,7 +19,8 @@ func submit(key: String, job: Callable) -> void:
 
 func _start(job: Callable) -> void:
 	_busy = true
-	if _thread and _thread.is_started():
+	var thread_running = _thread and _thread.is_started()
+	if thread_running:
 		_thread.wait_to_finish()
 	_thread = Thread.new()
 	_thread.start(_run.bind(job))
@@ -44,7 +41,7 @@ func _on_job_done() -> void:
 	_start(next_job)
 
 
-## Blocks until any in-flight job finishes. Call before this object is freed.
 func shutdown() -> void:
-	if _thread and _thread.is_started():
+	var thread_running = _thread and _thread.is_started()
+	if thread_running:
 		_thread.wait_to_finish()
