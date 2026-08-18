@@ -10,7 +10,10 @@ make dist
 cp ./fan-manager.zip "$PLUGIN_DIR/"
 
 
-if [[ ! -f /etc/fan-manager/fan-manager-priv-write || ! -f /etc/systemd/system/fan-manager-priv-write@.service || ! -f /etc/polkit-1/rules.d/50-fan-manager.rules ]]; then
+if  ! sudo test -f /etc/fan-manager/fan-manager-priv-write ||
+	! sudo test -f /etc/systemd/system/fan-manager-priv-write@.service ||
+	! sudo test -f /etc/polkit-1/rules.d/50-fan-manager.rules; then
+	echo "Setting Fan Manager config rules set.."
 	sudo mkdir -p /etc/fan-manager
 	sudo cp policy/fan-manager-priv-write /etc/fan-manager/fan-manager-priv-write
 	sudo chown root:root /etc/fan-manager/fan-manager-priv-write
@@ -26,3 +29,5 @@ if [[ ! -f /etc/fan-manager/fan-manager-priv-write || ! -f /etc/systemd/system/f
 
 	sudo systemctl daemon-reload
 fi
+
+echo "Fan Manager setup finished"
