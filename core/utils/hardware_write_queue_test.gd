@@ -59,3 +59,56 @@ func test_shutdown_waits_for_the_running_job() -> void:
 	queue.shutdown()
 
 	assert_true(ran[0])
+
+
+# regression: shutdown() calling straight after a submit() that landed in
+# _pending_jobs (because something else was still running) used to return
+# without ever starting that pending job - _on_job_done() is what pulls it
+# out of _pending_jobs, and that only runs later via call_deferred, which
+# never gets a chance to fire while shutdown() is blocking synchronously
+func test_shutdown_drains_a_job_still_pending_when_called() -> void:
+	var ran := [false, false]
+	queue.submit("fan-0", func():
+		OS.delay_msec(50)
+		ran[0] = true
+	)
+	queue.submit("fan-1", func(): ran[1] = true)
+
+	queue.shutdown()
+
+	assert_true(ran[0], "the already-running job should have finished")
+	assert_true(ran[1], "the job still in _pending_jobs should also have run")
+
+
+func test_submit_before_last_job_still_runs() -> void:
+	var ran := [false]
+	var noop_job := func(): pass
+	queue.submit("fan-0", func(): ran[0] = true)
+	queue.submit("mode", noop_job, true)
+
+	queue.shutdown()
+
+	assert_true(ran[0])
+
+
+func test_last_job_runs() -> void:
+	var ran := [false]
+	var mode_job := func(): ran[0] = true
+	queue.submit("mode", mode_job, true)
+
+	queue.shutdown()
+
+	assert_true(ran[0])
+
+
+func test_submit_after_last_job_is_ignored() -> void:
+	var ran := [false, false]
+	var mode_job := func(): ran[0] = true
+	var fan_job := func(): ran[1] = true
+	queue.submit("mode", mode_job, true)
+	queue.submit("fan-0", fan_job)
+
+	queue.shutdown()
+
+	assert_true(ran[0], "the last job itself should still run")
+	assert_false(ran[1], "a submit() after the last_job=true one must not run")

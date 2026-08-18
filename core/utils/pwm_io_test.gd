@@ -37,3 +37,19 @@ func test_systemd_escape_hex_escapes_literal_hyphen() -> void:
 	# "-" in the input must itself be escaped rather than passed
 	# through, or it would be ambiguous with an escaped "/".
 	assert_eq(PwmIo._systemd_escape("a-b"), "a\\x2db")
+
+
+func test_percent_to_pwm_roundtrip_bounds() -> void:
+	assert_eq(PwmIo.percent_to_pwm(0.0), 0)
+	assert_eq(PwmIo.percent_to_pwm(100.0), 255)
+	assert_eq(PwmIo.percent_to_pwm(50.0), 128)
+
+
+func test_percent_to_pwm_clamps_out_of_range() -> void:
+	assert_eq(PwmIo.percent_to_pwm(-10.0), 0)
+	assert_eq(PwmIo.percent_to_pwm(150.0), 255)
+
+
+func test_pwm_to_percent_bounds() -> void:
+	assert_almost_eq(PwmIo.pwm_to_percent(0), 0.0, 0.01)
+	assert_almost_eq(PwmIo.pwm_to_percent(255), 100.0, 0.01)

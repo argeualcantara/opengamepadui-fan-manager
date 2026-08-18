@@ -35,7 +35,7 @@ func get_fan_label(fan_id: String) -> String:
 # Try to find fan label if exists in any hwmon
 # fallsback to 'Fan <channel_'
 func _resolve_fan_label(device_path: String, channel_id: int) -> String:
-	var fan_label := PwmIo.read_text("%s/fan%d_label" % [device_path, channel_id]).strip_edges()
+	var fan_label := PwmIo.read_text("%s/fan%d_label" % [device_path, channel_id])
 
 	if fan_label.is_empty():
 		var hwmon_dir := DirAccess.open(HWMON_DIR)
@@ -46,9 +46,9 @@ func _resolve_fan_label(device_path: String, channel_id: int) -> String:
 			while hwmon_entry != "":
 				if not hwmon_entry.begins_with("."):
 					var hwmon_fan_label := "%s/%s/fan%d_label" % [HWMON_DIR, hwmon_entry, channel_id]
-					var hwmon_fan_label_text := PwmIo.read_text(hwmon_fan_label).strip_edges()
-					if not hwmon_fan_label_text.is_empty():
-						fan_label = hwmon_fan_label_text
+					var hwmon_fan_label_value := PwmIo.read_text(hwmon_fan_label)
+					if not hwmon_fan_label_value.is_empty():
+						fan_label = hwmon_fan_label_value
 						break
 				hwmon_entry = hwmon_dir.get_next()
 			hwmon_dir.list_dir_end()
@@ -73,8 +73,8 @@ func get_bios_curve(fan_id: String) -> Dictionary:
 
 	var curve := {}
 	for point in channel.points:
-		var point_temp := PwmIo.read_text(point.temp_path).strip_edges()
-		var point_pwm := PwmIo.read_text(point.fan_speed_path).strip_edges()
+		var point_temp := PwmIo.read_text(point.temp_path)
+		var point_pwm := PwmIo.read_text(point.fan_speed_path)
 
 		if point_temp.is_empty() or point_pwm.is_empty():
 			logger.warn(
@@ -131,7 +131,7 @@ func get_current_mode() -> String:
 	var channel := _get_channel(fans[0])
 	if not channel:
 		return ""
-	var pwm_enable_value := PwmIo.read_text(channel.pwm_enable_path).strip_edges()
+	var pwm_enable_value := PwmIo.read_text(channel.pwm_enable_path)
 
 	var mode := ""
 	if pwm_enable_value == str(AsusPwmEnable.MANUAL):
@@ -181,7 +181,7 @@ func read_temperature(fan_id: String) -> float:
 	var channel := _get_channel(fan_id)
 	if not channel:
 		return -1.0
-	var pwm_temp := PwmIo.read_text(channel.readonly_temp_sensor_path).strip_edges()
+	var pwm_temp := PwmIo.read_text(channel.readonly_temp_sensor_path)
 	if pwm_temp.is_empty():
 		logger.warn("Unable to read temp%d_input for %s" % [channel.channel_id, fan_id])
 		return -1.0
@@ -194,7 +194,7 @@ func read_fan_percent(fan_id: String) -> float:
 	var channel := _get_channel(fan_id)
 	if not channel:
 		return -1.0
-	var pwm_fan_speed := PwmIo.read_text(channel.readonly_fan_speed_path).strip_edges()
+	var pwm_fan_speed := PwmIo.read_text(channel.readonly_fan_speed_path)
 	if pwm_fan_speed.is_empty():
 		logger.warn("Unable to read pwm%d for %s" % [channel.channel_id, fan_id])
 		return -1.0
@@ -219,7 +219,7 @@ func _get_or_discover_fans() -> Array[String]:
 	while hwmon_entry != "":
 		if not hwmon_entry.begins_with("."):
 			var device_path := HWMON_DIR + "/" + hwmon_entry
-			var device_name := PwmIo.read_text(device_path + "/name").strip_edges()
+			var device_name := PwmIo.read_text(device_path + "/name")
 			seen.append("%s -> '%s'" % [hwmon_entry, device_name])
 			if device_name == ASUS_WMI_CUSTOM_CURVE_HWMON_NAME:
 				for channel_id in range(1, MAX_FAN_CHANNELS + 1):

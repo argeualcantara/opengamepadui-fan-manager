@@ -1,34 +1,12 @@
 #!/bin/bash
 # fan-manager-priv-write <systemd-escape(path)>@<systemd-escape(value)>
 #
-# Privileged helper, run as root via the fan-manager-priv-write@.service
-# systemd template unit (see that file in this same directory), started
-# with `systemctl start fan-manager-priv-write@<instance>.service` and
-# authorized without a password by the polkit rule in
-# 50-fan-manager.rules — which matches on
-# org.freedesktop.systemd1.manage-units plus this exact unit-name
-# prefix, not on this script's own path. That's deliberate: an earlier
-# version of this helper was invoked directly via pkexec, but pkexec's
-# org.freedesktop.policykit.exec.path annotation matches against the
-# binary actually execve()'d, which for a "#!/bin/bash" script is the
-# interpreter (/bin/bash), not the script — so the custom action never
-# matched and pkexec silently fell back to requiring a password every
-# time. Going through systemd instead sidesteps that: the polkit check
-# happens on the unit name, so this can stay a plain script.
-#
-# The instance argument packs both path and value (systemd unit
-# instances are a single string) as
-# "<systemd-escape(path)>@<systemd-escape(value)>" — "@" is never
-# produced by systemd-escape's own output, so it's a safe separator.
-# Writes value to path, but only if path canonicalizes to one of this
-# plugin's own fan control attributes, and value passes a strict
-# per-attribute check. Everything below exists to make sure that
-# doesn't become "run anything as root",  a generic passthrough here
-# would be a local privilege-escalation vector, not a fan controller.
-# Keep the whitelist and value checks exactly as strict as what's
-# actually needed by AsusWmiFanBackend/HwmonFanBackend
-# (core/backends/*.gd): pwm<N>_enable, bare pwm<N>, and
-# pwm<N>_auto_point<I>_temp/_pwm.
+# runs as root, started via fan-manager-priv-write@.service instead of
+# pkexec directly (pkexec checks the actual binary, which
+# for a bash script is just bash, always asked for a password).
+# this file is the actual safety check: only writes if
+# path is one of this plugin's own fan attributes and value passes
+# per-attribute validation, otherwise it's just root access to anything.
 
 set -euo pipefail
 
@@ -49,20 +27,10 @@ fi
 requested_path="$(systemd-escape -u -- "$encoded_path")"
 value="$(systemd-escape -u -- "$encoded_value")"
 
-# realpath -e fails (and refuses) if the path doesn't exist yet, which
-# is exactly right here: every attribute this helper ever writes to
-# already exists (created by the kernel driver), so a path that
-# doesn't resolve is never legitimate. This also collapses any "../"
-# tricks and symlinks before the whitelist check below sees it, so
-# matching against the resolved path is what actually matters, not
-# whatever string was passed in.
 real_path="$(realpath -e -- "$requested_path")"
 
 # Whitelist: only this plugin's own fan-curve attributes, wherever
-# under /sys/devices a given hwmon<N> happens to live (that prefix is
-# driver/platform-specific and not worth hardcoding,  what's fixed is
-# that every hwmon attribute always resolves under a "hwmon/hwmonN/"
-# directory).
+# under /sys/devices a given hwmon<N> happens to live.
 if [[ ! "$real_path" =~ ^/sys/devices/.*/hwmon/hwmon[0-9]+/(pwm[0-9]+|pwm[0-9]+_enable|pwm[0-9]+_auto_point[0-9]+_(temp|pwm))$ ]]; then
     echo "refusing to write to disallowed path: $real_path" >&2
     exit 1

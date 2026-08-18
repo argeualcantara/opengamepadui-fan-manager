@@ -78,8 +78,7 @@ func get_current_mode() -> String:
 	var channel := _get_channel(fans[0])
 	if not channel:
 		return ""
-	var pwm_enable_raw = PwmIo.read_text(channel.pwm_enable_path)
-	var pwm_enable_value := pwm_enable_raw.strip_edges()
+	var pwm_enable_value = PwmIo.read_text(channel.pwm_enable_path)
 
 	var mode := ""
 	if pwm_enable_value == str(PwmEnable.MANUAL):
@@ -107,8 +106,8 @@ func apply_custom_curve(fan_id: String, curve: Dictionary) -> bool:
 		logger.error("Cannot apply custom curve to %s: temperature read failed" % fan_id)
 		return false
 
-	var percent := _interpolate_curve(curve, temperature)
-	var pwm_value := _percent_to_pwm(percent)
+	var percent := FanCurveUtils.interpolate_value(curve, temperature)
+	var pwm_value := PwmIo.percent_to_pwm(percent)
 	logger.debug(
 		"apply_custom_curve(%s): temp=%.1f°C -> %.1f%% -> pwm=%d" % [fan_id, temperature, percent, pwm_value]
 	)
@@ -137,8 +136,7 @@ func read_temperature(fan_id: String) -> float:
 	var channel := _get_channel(fan_id)
 	if not channel:
 		return -1.0
-	var pwm_temp_raw = _read_text(channel.readonly_temp_sensor_path)
-	var pwm_temp := pwm_temp_raw.strip_edges()
+	var pwm_temp = PwmIo.read_text(channel.readonly_temp_sensor_path)
 	if pwm_temp.is_empty():
 		logger.warn("Unable to read temp%d_input for %s" % [channel.channel_id, fan_id])
 		return -1.0
@@ -151,13 +149,12 @@ func read_fan_percent(fan_id: String) -> float:
 	var channel := _get_channel(fan_id)
 	if not channel:
 		return -1.0
-	var pwm_fan_speed_raw = _read_text(channel.readonly_fan_speed_path)
-	var pwm_fan_speed := pwm_fan_speed_raw.strip_edges()
+	var pwm_fan_speed = PwmIo.read_text(channel.readonly_fan_speed_path)
 	if pwm_fan_speed.is_empty():
 		logger.warn("Unable to read pwm%d for %s" % [channel.channel_id, fan_id])
 		return -1.0
 	var pwm_int = pwm_fan_speed.to_int()
-	var percent := _pwm_to_percent(pwm_int)
+	var percent := PwmIo.pwm_to_percent(pwm_int)
 	logger.debug("read_fan_percent(%s) -> %.1f%% (pwm_fan_speed='%s')" % [fan_id, percent, pwm_fan_speed])
 	return percent
 
@@ -278,27 +275,10 @@ func _ensure_manual_mode(fan_id: String) -> bool:
 	if not channel:
 		return false
 
-	var pwm_enable_raw = _read_text(channel.pwm_enable_path)
-	var pwm_enable_value := pwm_enable_raw.strip_edges()
+	var pwm_enable_value = PwmIo.read_text(channel.pwm_enable_path)
 	if pwm_enable_value == str(PwmEnable.MANUAL):
 		logger.debug("%s already in manual pwm control" % fan_id)
 		return true
 
 	logger.info("Switching %s to manual pwm control before applying custom curve" % fan_id)
 	return _write_text(channel.pwm_enable_path, str(PwmEnable.MANUAL))
-
-
-func _interpolate_curve(curve: Dictionary, temperature: float) -> float:
-	return FanCurveUtils.interpolate_value(curve, temperature)
-
-
-func _percent_to_pwm(percent: float) -> int:
-	return PwmIo.percent_to_pwm(percent)
-
-
-func _pwm_to_percent(pwm_value: int) -> float:
-	return PwmIo.pwm_to_percent(pwm_value)
-
-
-func _read_text(path: String) -> String:
-	return PwmIo.read_text(path)

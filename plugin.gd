@@ -61,7 +61,11 @@ func get_settings_menu() -> Control:
 
 
 func unload() -> void:
-	if write_queue:
+
+	if write_queue and mode_manager and mode_manager.backend:
+		# stops accepting new jobs to ensure bios is the last written job
+		var last_job = true
+		write_queue.submit("mode", mode_manager.change_to_mode_bios_job(), last_job)
 		write_queue.shutdown()
 
 	if game_curve_manager:

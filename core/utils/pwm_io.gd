@@ -35,7 +35,7 @@ static func read_text(path: String) -> String:
 	f.close()
 	var as_text := bytes.get_string_from_utf8().replace("\n", "")
 	logger.debug("read_text('%s') -> '%s'" % [path, as_text])
-	return as_text
+	return as_text.strip_edges()
 
 
 # tries a direct write first (works if we already have permission, e.g. a
@@ -73,10 +73,9 @@ const PRIV_WRITE_UNIT_TEMPLATE := "fan-manager-priv-write@%s.service"
 const _SYSTEMD_ESCAPE_SAFE_CHARS := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:_."
 
 
-# reimplements `systemd-escape <value>` in gdscript instead of shelling out
-# - _privileged_write() calls this twice per write and a single Apply can
-# fire 30+ writes, spawning that many extra processes was noticeably
-# freezing the UI on real hardware
+# reimplements systemd-escape's encoding here instead of shelling out -
+# this gets called twice per write and a single Apply can fire 30+
+# writes (asus wmi has 8 points with temp and pwm per point + pwm_enable writes).
 static func _systemd_escape(value: String) -> String:
 	var result := ""
 	for byte in value.to_utf8_buffer():

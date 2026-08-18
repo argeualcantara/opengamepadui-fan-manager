@@ -14,10 +14,8 @@ const DMI_BOARD_NAME := "/sys/class/dmi/id/board_name"
 
 static func from_dmi() -> String:
 	var logger := Log.get_logger("FanManager HardwareId")
-	var product_raw = _read_text(DMI_PRODUCT_NAME)
-	var product := product_raw.strip_edges()
-	var board_raw = _read_text(DMI_BOARD_NAME)
-	var board := board_raw.strip_edges()
+	var product = PwmIo.read_text(DMI_PRODUCT_NAME)
+	var board = PwmIo.read_text(DMI_BOARD_NAME)
 	logger.debug(
 		"Read DMI: %s='%s' %s='%s'"
 		% [DMI_PRODUCT_NAME, product, DMI_BOARD_NAME, board]
@@ -30,6 +28,3 @@ static func from_dmi() -> String:
 	logger.info("Detected device: product='%s' board='%s'" % [product, board])
 	return "%s-%s" % [product, board]
 
-
-static func _read_text(path: String) -> String:
-	return PwmIo.read_text(path)

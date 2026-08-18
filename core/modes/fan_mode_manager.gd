@@ -97,7 +97,7 @@ func set_mode(mode: String, user_initiated: bool = false) -> bool:
 		logger.error("Unknown fan mode '%s'" % mode)
 		return false
 
-	# already there, skip the whole stop/restart dance. needed because
+	# already there, skip the whole stop/restart.
 	# GameCurveManager calls set_mode("custom") to restore a per-game context
 	# even while already in custom mode.
 	if mode == current_mode:
@@ -134,6 +134,20 @@ func _queue_backend_mode_write(mode: String) -> void:
 	else:
 		job.call()
 
+func change_to_mode_bios_job() ->  Callable:
+	var backend_ref := backend
+	var mode = "bios"
+	var job := func():
+		var write_ok = backend_ref.set_mode(mode)
+		if not write_ok:
+			logger.error("Backend failed to switch to mode '%s'" % mode)
+	for engine in curve_engines.values():
+		engine.stop()
+
+	current_mode = mode
+	_persist_active_mode(mode)
+	fan_mode_changed.emit(mode, false)
+	return job
 
 func get_curve_engine(fan_id: String) -> CustomCurveEngine:
 	return curve_engines.get(fan_id)
@@ -156,11 +170,9 @@ func _ensure_curve_engine(fan_id: String) -> CustomCurveEngine:
 
 
 # seeds every fan from the shared "__default__" game_curves entry, creating
-# it with the balanced curve the first time this ever runs. only writes it
-# to disk when per-game tracking is off though - checked straight from the
-# json cache, we don't want a dependency on GameCurveManager here. while
-# per-game is on nobody reads "__default__" anyway, so writing it would just
-# leave a dead entry around.
+# it with the balanced curve the first time this ever runs. 
+# only writes it to disk when per-game is off though 
+# while per-game is on nobody reads "__default__".
 func _start_custom_mode() -> void:
 	var fans := backend.list_fans()
 	if fans.is_empty():

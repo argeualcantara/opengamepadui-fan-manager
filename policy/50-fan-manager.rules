@@ -1,29 +1,13 @@
-// Installs to /etc/polkit-1/rules.d/. Grants the active local
-// graphical session's own user permission to start (and only start)
-// instances of the fan-manager-priv-write@.service template unit
-// (see that file and fan-manager-priv-write's own header comment for
-// why this exists instead of a plain pkexec call), without a
-// password prompt.
+// goes in /etc/polkit-1/rules.d/. lets the local logged-in user start
+// fan-manager-priv-write@.service instances without a password -
+// needed because writes happen constantly while polling, not as a
+// one-off action, so prompting every time isn't an option. same
+// trust model this device already uses for TDP/GPU clock controls
+// (local user, no remote/multi-user concern here).
 //
-// Same pattern already used by this OS image itself for uupd
-// (/etc/polkit-1/rules.d/uupd.rules), matching on
-// org.freedesktop.systemd1.manage-units + a specific unit name —
-// generalized here to a regex since fan-manager-priv-write@ is a
-// template with a different instance string per write, not a single
-// fixed unit name.
-//
-// allow_active-equivalent (subject.active): fan curve writes happen
-// continuously while polling (CustomCurveEngine's poll timer), not as
-// a one-off user action, so prompting per-write isn't viable — same
-// trust model already used by this device family for TDP/GPU clock
-// controls (frequent writes, local physically-present user, no
-// remote/multi-user scenario to protect against).
-//
-// The actual safety boundary is NOT this file: it's
-// fan-manager-priv-write's own path whitelist and per-attribute value
-// validation, run every time regardless of how it got invoked. This
-// file only controls WHO may start the unit, not what the unit is
-// allowed to do once started.
+// this file only decides who can start the unit, not what it's
+// allowed to do once running - the real safety check is the path
+// whitelist and value validation inside fan-manager-priv-write itself.
 
 polkit.addRule(function(action, subject) {
 	if (action.id != "org.freedesktop.systemd1.manage-units") {
@@ -36,11 +20,12 @@ polkit.addRule(function(action, subject) {
 	if (!/^fan-manager-priv-write@[^/]+\.service$/.test(unit)) {
 		return polkit.Result.NOT_HANDLED;
 	}
-	if (verb && verb != "start") {
+	
+	if (verb !== "start") {
 		return polkit.Result.NOT_HANDLED;
 	}
 
-	if (subject.active && subject.local && subject.isInGroup("wheel")) {
+	if (subject.active && subject.local && subject.isInGroup("bazzite")) {
 		return polkit.Result.YES;
 	}
 
