@@ -1,0 +1,75 @@
+name: Test
+
+# Runs the standalone GUT harness under tests/ (see tests/project.godot's
+# header comment for what it is and why it exists) against every push/PR.
+# Godot itself and the GUT addon are never committed to this repo,  both
+# are pinned exact versions, downloaded fresh each run, so there's nothing
+# here to keep in sync by hand.
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+  workflow_call:
+
+env:
+  GODOT_VERSION: 4.7.1-stable
+  GUT_VERSION: v9.2.0 # matches tests/addons/gut/plugin.cfg's declared version
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Godot + GUT downloads
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot-bin
+            ~/gut-src
+          # -r2 busts caches from before the GUT_VERSION Logger/native-class
+          # patch below existed (actions/cache keys are immutable, an old
+          # cache entry under the same key would keep serving the unpatched
+          # download forever). Bump this suffix again if the patch changes.
+          key: godot-${{ env.GODOT_VERSION }}-gut-${{ env.GUT_VERSION }}-r2
+
+      - name: Download Godot
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot-bin
+          curl -sL -o /tmp/godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d /tmp/godot-extracted
+          mv /tmp/godot-extracted/Godot_v${GODOT_VERSION}_linux.x86_64 ~/godot-bin/godot
+          chmod +x ~/godot-bin/godot
+
+      - name: Download GUT
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/gut-src
+          curl -sL -o /tmp/gut.zip \
+            "https://github.com/bitwes/Gut/archive/refs/tags/${GUT_VERSION}.zip"
+          unzip -q /tmp/gut.zip -d /tmp/gut-extracted
+          mv /tmp/gut-extracted/Gut-*/addons/gut ~/gut-src/gut
+          # replacing Logger with Stub Logger class
+          sed -i 's/\bLogger\b/GutLogger/g' ~/gut-src/gut/utils.gd
+
+      - name: Assemble test harness
+        run: |
+          mkdir -p tests/addons tests/plugins
+          cp -r ~/gut-src/gut tests/addons/gut
+          ln -s ../.. tests/plugins/fan-manager
+
+      - name: Import project (populates the global script class cache)
+        run: ~/godot-bin/godot --headless --editor --quit --path tests
+
+      - name: Run tests
+        run: >
+          ~/godot-bin/godot --headless --path tests
+          -s res://addons/gut/gut_cmdln.gd
+          -gdir=res://plugins/fan-manager/core -ginclude_subdirs
+          -gprefix= -gsuffix=_test.gd
+          -gexit

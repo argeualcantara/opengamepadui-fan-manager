@@ -1,0 +1,20 @@
+; Disposable, standalone test harness for this repo,  NOT part of the
+; distributed plugin (see .gitignore: this whole tests/ dir is
+; excluded). Exists only so `core/*_test.gd` (GUT) can run without
+; needing to be loaded as a plugin inside a full OpenGamepadUI
+; checkout: plugins/fan-manager/ below is a symlink to the repo root
+; (so res://plugins/fan-manager/core/... resolves exactly like it
+; does under a real OGUI install), addons/gut/ is a vendored copy of
+; the GUT addon, and stubs/log.gd stands in for OGUI's real Log
+; autoload/class (see its own doc comment).
+
+config_version=5
+
+[application]
+
+config/name="fan-manager-tests"
+config/features=PackedStringArray("4.3", "Forward Plus")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gut/plugin.cfg")

@@ -1,57 +1,64 @@
 extends RefCounted
 class_name FanCurveStore
 
-## Persists fan mode/curve configuration per hardware.
-##
-## One JSON file per hardware_id under user://data/fan-manager/. This
-## class only knows about "hardware_id"/"active_mode"/"active_profile"/
-## "profiles"; the rest of the document is written directly by other
-## callers (FanModeManager, ProfileManagerPanel, GameCurveManager) via
-## load_data()/save(), not through dedicated methods here. Full schema:
-## {
-##   "hardware_id": "...",
-##   "active_mode": "bios" | "custom",
-##   "active_profile": "<name>" | null,
-##   "profiles": {
-##     "<name>": { "<fan_id>": { "<temp>": <percent>, ... }, ... }, ...
-##   },
-##   # Written by GameCurveManager. active_game_context is persisted on
-##   # every app switch regardless of the toggle below; per_game_enabled
-##   # only once it's been changed; game_curves only while the toggle is on:
-##   "per_game_enabled": <bool>,
-##   "active_game_context": "<context key>",
-##   "game_curves": {
-##     "<context key>": {
-##       "mode": "bios" | "custom",
-##       "active_profile": "<name>" | null,
-##       "curve": { "<fan_id>": { "<temp>": <percent>, ... }, ... }
-##     }, ...
-##   }
-## }
-## <context key> is either "__steam_home__" (STEAM_HOME_KEY in
-## GameCurveManager, nothing running) or the running app's launch item
-## name, lowercased.
+# saves fan mode/curve config per hardware, one json file under
+# user://data/fan-manager/. kept in memory once loaded (load_data()),
+# callers mutate it with the set_*() below then call flush() when done.
+#
+# schema:
+# {
+#   "hardware_id": "...",
+#   "active_mode": "bios" | "custom",
+#   "per_game_enabled": <bool>,
+#   "active_game_context": "<context key>",
+#   "game_curves": {
+#     "<context key>": {
+#       "mode": "bios" | "custom",
+#       "curve": { "<fan_id>": { "<temp>": <percent>, ... }, ... }
+#     }, ...
+#   }
+# }
+# context key is "__default__" (per-game off, or nothing seen yet),
+# "__steam_home__" (nothing running), or the app's name lowercased.
 
 const DATA_DIR := "user://data/fan-manager"
 
 var logger := Log.get_logger("FanManager FanCurveStore")
 
+# same dictionary instance shared by everyone who calls load_data() for this
+# hardware_id, so mutating it is visible everywhere without touching disk.
+# only flush() actually writes.
+var _data: Dictionary = {}
+var _hardware_id: String = ""
 
-## Returns true if a document has already been saved for hardware_id
-## (vs. a genuinely first run).
+# jobs queued with enqueue(), run when flush() drains them - so a job that
+# reads some other object's live state (like an engine's current curve)
+# always sees it as it stands at the end, not mid-operation.
+var _jobs: Array[Callable] = []
+var _draining := false
+
+
 func exists(hardware_id: String) -> bool:
-	var result := FileAccess.file_exists(_path_for(hardware_id))
+	var path = _path_for(hardware_id)
+	var result := FileAccess.file_exists(path)
 	logger.debug("exists('%s') -> %s" % [hardware_id, result])
 	return result
 
 
-## Returns the persisted document for hardware_id, or a fresh default
-## document (not written to disk) if none exists yet or the file is
-## corrupt.
 func load_data(hardware_id: String) -> Dictionary:
+	if _hardware_id == hardware_id and not _data.is_empty():
+		return _data
+
+	_hardware_id = hardware_id
+	_data = _read_from_disk(hardware_id)
+	return _data
+
+
+func _read_from_disk(hardware_id: String) -> Dictionary:
 	var path := _path_for(hardware_id)
 
-	if not FileAccess.file_exists(path):
+	var file_exists = FileAccess.file_exists(path)
+	if not file_exists:
 		logger.debug("load_data('%s'): %s doesn't exist yet, returning defaults" % [hardware_id, path])
 		return _default_data(hardware_id)
 
@@ -70,9 +77,12 @@ func load_data(hardware_id: String) -> Dictionary:
 	return parsed as Dictionary
 
 
-## Writes data for hardware_id atomically (temp file + rename) so a
-## crash mid-write can't leave a corrupt file. Returns true on success.
+# writes atomically (temp file + rename) so a crash mid-write can't leave a
+# corrupt file
 func save(hardware_id: String, data: Dictionary) -> bool:
+	_hardware_id = hardware_id
+	_data = data
+
 	var path := _path_for(hardware_id)
 	var dir_path := path.get_base_dir()
 	logger.debug("save('%s') -> %s: keys=%s" % [hardware_id, path, data.keys()])
@@ -88,8 +98,9 @@ func save(hardware_id: String, data: Dictionary) -> bool:
 		logger.error("Unable to open %s for writing" % tmp_path)
 		return false
 
-	file.store_string(JSON.stringify(data, "\t"))
-	file = null  # close/flush before renaming, so the rename is atomic-safe
+	var json_text = JSON.stringify(data, "\t")
+	file.store_string(json_text)
+	file = null  # close it before renaming
 
 	var rename_err := DirAccess.rename_absolute(tmp_path, path)
 	if rename_err != OK:
@@ -101,101 +112,68 @@ func save(hardware_id: String, data: Dictionary) -> bool:
 	return true
 
 
-## Saves (creating or overwriting) a named curve profile for
-## hardware_id. Does not change active_mode/active_profile. Returns
-## false if name is empty.
-func save_profile(hardware_id: String, name: String, curve: Dictionary) -> bool:
-	if name.is_empty():
-		logger.error("Cannot save a profile with an empty name")
+# --- in-memory mutators, no disk I/O. caller needs to have called
+# load_data() first, then flush() when they're actually done. ---
+
+func set_active_mode(mode: String) -> void:
+	_data["active_mode"] = mode
+
+
+func set_per_game_enabled(value: bool) -> void:
+	_data["per_game_enabled"] = value
+
+func get_per_game_enabled() -> bool:
+	return _data.get("per_game_enabled", false)
+
+func set_active_game_context(context_key: String) -> void:
+	_data["active_game_context"] = context_key
+
+
+func set_game_curve(context_key: String, mode: String, curve: Dictionary) -> void:
+	var game_curves: Dictionary = _data.get("game_curves", {})
+	game_curves[context_key] = {"mode": mode, "curve": curve}
+	_data["game_curves"] = game_curves
+
+
+func enqueue(job: Callable) -> void:
+	_jobs.append(job)
+
+
+# runs every queued job then writes to disk once. call this exactly once at
+# the end of whatever you're doing, not in the middle - otherwise a job
+# queued earlier in the same operation would get read too soon.
+func flush() -> bool:
+	if _draining:
 		return false
-
-	logger.debug("save_profile('%s', '%s'): %s" % [hardware_id, name, curve])
-
-	var data := load_data(hardware_id)
-	var profiles: Dictionary = data.get("profiles")
-	if profiles == null:
-		profiles = {}
-
-	profiles[name] = curve
-	data["profiles"] = profiles
-
-	var saved := save(hardware_id, data)
-	if saved:
-		logger.info("Saved profile '%s' for hardware '%s'" % [name, hardware_id])
-	return saved
+	_draining = true
+	while not _jobs.is_empty():
+		var job: Callable = _jobs.pop_front()
+		job.call()
+	_draining = false
+	return save(_hardware_id, _data)
 
 
-## Deletes profile name for hardware_id. Clears active_profile if it
-## pointed at this profile. Returns false if the profile doesn't exist.
-func delete_profile(hardware_id: String, name: String) -> bool:
-	var data := load_data(hardware_id)
-	var profiles: Dictionary = data.get("profiles")
-
-	if profiles == null:
-		profiles = {}
-
-	if not profiles.has(name):
-		logger.warn("Cannot delete profile '%s': not found for hardware '%s'" % [name, hardware_id])
-		return false
-
-	profiles.erase(name)
-	data["profiles"] = profiles
-	var was_active: bool = data.get("active_profile") == name
-	if was_active:
-		data["active_profile"] = null
-
-	logger.debug(
-		"delete_profile('%s', '%s'): was_active=%s, %d profile(s) remaining"
-		% [hardware_id, name, was_active, profiles.size()]
-	)
-
-	var saved := save(hardware_id, data)
-	if saved:
-		logger.info("Deleted profile '%s' for hardware '%s'" % [name, hardware_id])
-	return saved
-
-
-## Returns the names of all saved profiles for hardware_id.
-func list_profiles(hardware_id: String) -> Array[String]:
-	var data := load_data(hardware_id)
-	var profiles: Dictionary = data.get("profiles")
-
-	if profiles == null:
-		profiles = {}
-
-	var names: Array[String] = []
-	for profile_name in profiles.keys():
-		names.append(profile_name)
-	logger.debug("list_profiles('%s') -> %s" % [hardware_id, names])
-	return names
-
-
-## Returns a fresh, empty document for hardware_id (see the schema in
-## the header comment).
 func _default_data(hardware_id: String) -> Dictionary:
 	return {
 		"hardware_id": hardware_id,
 		"active_mode": "bios",
-		"active_profile": null,
-		"profiles": {},
 	}
 
 
-## Returns the JSON file path on disk for hardware_id.
 func _path_for(hardware_id: String) -> String:
 	return "%s/%s.json" % [DATA_DIR, _sanitize_id(hardware_id)]
 
 
-## hardware_id values are derived from free-form hardware strings (e.g.
-## DMI product/board names) and may contain spaces, slashes, or other
-## characters unsafe for a filename. Anything outside [A-Za-z0-9_-] is
-## replaced with "_".
+# hardware_id comes from stuff like DMI product/board names, can have
+# spaces/slashes/whatever, not safe as a filename. strip anything not
+# alphanumeric/underscore/dash.
 func _sanitize_id(hardware_id: String) -> String:
 	var sanitized := ""
 	var allowed := "abcdefghijklmnopqrstuvwxyz0123456789_-"
 	for i in hardware_id.length():
 		var c := hardware_id[i]
-		if allowed.contains(c.to_lower()):
+		var c_lower = c.to_lower()
+		if allowed.contains(c_lower):
 			sanitized += c
 		else:
 			sanitized += "_"

@@ -1,0 +1,33 @@
+// goes in /etc/polkit-1/rules.d/. lets the local logged-in user start
+// fan-manager-priv-write@.service instances without a password -
+// needed because writes happen constantly while polling, not as a
+// one-off action, so prompting every time isn't an option. same
+// trust model this device already uses for TDP/GPU clock controls
+// (local user, no remote/multi-user concern here).
+//
+// this file only decides who can start the unit, not what it's
+// allowed to do once running - the real safety check is the path
+// whitelist and value validation inside fan-manager-priv-write itself.
+
+polkit.addRule(function(action, subject) {
+	if (action.id != "org.freedesktop.systemd1.manage-units") {
+		return polkit.Result.NOT_HANDLED;
+	}
+
+	var unit = action.lookup("unit");
+	var verb = action.lookup("verb");
+
+	if (!/^fan-manager-priv-write@[^/]+\.service$/.test(unit)) {
+		return polkit.Result.NOT_HANDLED;
+	}
+	
+	if (verb !== "start") {
+		return polkit.Result.NOT_HANDLED;
+	}
+
+	if (subject.active && subject.local && subject.isInGroup("bazzite")) {
+		return polkit.Result.YES;
+	}
+
+	return polkit.Result.NOT_HANDLED;
+});

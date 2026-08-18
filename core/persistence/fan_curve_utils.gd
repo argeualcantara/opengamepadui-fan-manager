@@ -11,9 +11,10 @@ static var logger := Log.get_logger("FanManager FanCurveUtils")
 ## (10-100°C, step 10).
 const FIXED_TEMPERATURE_POINTS: Array[int] = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
-## Name of the built-in profile FanModeManager creates automatically
-## the first time Custom Mode is entered with no profile chosen yet.
-const DEFAULT_PROFILE_NAME := "Default"
+# context key used when per-game tracking is off, or nothing's been seen
+# yet. FanModeManager fills this one in with the balanced curve the first
+# time custom mode gets turned on.
+const GLOBAL_DEFAULT_CONTEXT_KEY := "__default__"
 
 ## A gentle, generally-safe starting curve: silent at idle, ramping up
 ## through 40-70°C, maxing out at 90°C. Deliberately not read from
@@ -23,8 +24,8 @@ const DEFAULT_BALANCED_CURVE := {
 	20: 0.0,
 	30: 20.0,
 	40: 35.0,
-	50: 50.0,
-	60: 65.0,
+	50: 40.0,
+	60: 55.0,
 	70: 80.0,
 	80: 90.0,
 	90: 100.0,
@@ -79,7 +80,7 @@ static func interpolate_value(curve: Dictionary, temperature: float) -> float:
 			if span <= 0.0:
 				return lower_percent
 			var t := (temperature - lower_temp) / span
-			var result := lerp(lower_percent, upper_percent, t)
+			var result: float = lerp(lower_percent, upper_percent, t)
 			logger.debug(
 				"interpolate_value(%.1f°C): between %d°C(%.1f%%) and %d°C(%.1f%%) -> %.1f%%"
 				% [temperature, lower_temp, lower_percent, upper_temp, upper_percent, result]
