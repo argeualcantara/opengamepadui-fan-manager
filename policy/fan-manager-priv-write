@@ -1,0 +1,60 @@
+#!/bin/bash
+# fan-manager-priv-write <systemd-escape(path)>@<systemd-escape(value)>
+#
+# runs as root, started via fan-manager-priv-write@.service instead of
+# pkexec directly (pkexec checks the actual binary, which
+# for a bash script is just bash, always asked for a password).
+# this file is the actual safety check: only writes if
+# path is one of this plugin's own fan attributes and value passes
+# per-attribute validation, otherwise it's just root access to anything.
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+    echo "usage: fan-manager-priv-write <systemd-escape(path)>@<systemd-escape(value)>" >&2
+    exit 1
+fi
+
+instance="$1"
+encoded_path="${instance%%@*}"
+encoded_value="${instance#*@}"
+
+if [[ "$encoded_path" == "$instance" ]]; then
+    echo "malformed instance, missing '@' separator: $instance" >&2
+    exit 1
+fi
+
+requested_path="$(systemd-escape -u -- "$encoded_path")"
+value="$(systemd-escape -u -- "$encoded_value")"
+
+real_path="$(realpath -e -- "$requested_path")"
+
+# Whitelist: only this plugin's own fan-curve attributes, wherever
+# under /sys/devices a given hwmon<N> happens to live.
+if [[ ! "$real_path" =~ ^/sys/devices/.*/hwmon/hwmon[0-9]+/(pwm[0-9]+|pwm[0-9]+_enable|pwm[0-9]+_auto_point[0-9]+_(temp|pwm))$ ]]; then
+    echo "refusing to write to disallowed path: $real_path" >&2
+    exit 1
+fi
+
+# Per-attribute value validation. Every value this helper ever needs
+# to write is a small non-negative integer; reject anything else
+# outright rather than trying to sanitize it.
+case "$real_path" in
+    *_enable)
+        # AsusPwmEnable/PwmEnable: 1=manual, 2=bios/automatic, 3=asus-only reset-default.
+        [[ "$value" =~ ^[123]$ ]] || { echo "invalid pwm_enable value: $value" >&2; exit 1; }
+        ;;
+    *_auto_point*_temp)
+        # Plain Celsius integer (see AsusWmiFanBackend.get_bios_curve()'s
+        # doc comment),  generous but bounded upper limit.
+        [[ "$value" =~ ^[0-9]{1,3}$ ]] && (( 10#$value <= 150 )) \
+            || { echo "invalid temp point value: $value" >&2; exit 1; }
+        ;;
+    *)
+        # Bare pwm<N> or pwm<N>_auto_point<I>_pwm: 0-255 duty cycle.
+        [[ "$value" =~ ^[0-9]{1,3}$ ]] && (( 10#$value <= 255 )) \
+            || { echo "invalid pwm/duty value: $value" >&2; exit 1; }
+        ;;
+esac
+
+echo "$value" > "$real_path"

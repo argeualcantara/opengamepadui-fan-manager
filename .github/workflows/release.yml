@@ -12,7 +12,11 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
   release:
+    needs: test
     runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, '[skip release]')"
     steps:

@@ -29,7 +29,7 @@ Godot editor with the plugin loaded.
 
 ## Testing on real hardware
 
-`PwmIo.dry_run` (`core/backends/pwm_io.gd`) defaults to `true`: every
+`PwmIo.dry_run` (`core/utils/pwm_io.gd`) defaults to `true`: every
 sysfs write any backend would make (`pwm1_enable`, `pwm1_auto_point*`,
 etc.) is logged instead: exact path and exact value, one line per
 attribute: and nothing is actually written to the fan hardware. This

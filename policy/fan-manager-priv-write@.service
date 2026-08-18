@@ -1,0 +1,14 @@
+[Unit]
+Description=fan-manager privileged sysfs write (%i)
+
+# Installs to /etc/systemd/system/. Templated so each write gets its
+# own transient instance: PwmIo starts it as
+# `systemctl start fan-manager-priv-write@<instance>.service`, where
+# <instance> is built by the caller with systemd-escape (see
+# fan-manager-priv-write's own header comment for the exact encoding
+# and why this whole systemd-unit indirection exists instead of a
+# plain pkexec call).
+
+[Service]
+Type=oneshot
+ExecStart=/etc/fan-manager/fan-manager-priv-write %i

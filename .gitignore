@@ -2,3 +2,8 @@ build/
 dist/
 *.zip
 .godot/
+*.gd.uid
+tests/addons/
+tests/plugins/
+tests/.godot/
+tests/pwm_io*.gd
