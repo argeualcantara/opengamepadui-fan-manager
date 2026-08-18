@@ -19,7 +19,7 @@ const HardwareWriteQueue = preload("res://plugins/fan-manager/core/utils/hardwar
 
 signal curve_changed(curve: Dictionary)
 
-const DEFAULT_POLL_INTERVAL_SEC := 10.0
+const DEFAULT_POLL_INTERVAL_SEC := 5.0
 
 var logger := Log.get_logger("FanManager CustomCurveEngine")
 

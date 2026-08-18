@@ -48,7 +48,10 @@ var per_game_enabled: bool = false:
 				)
 				for engine in mode_manager.curve_engines.values():
 					engine.stop()
+			# when per game enabled is false, should always reload __default__ 
+			# context mode as well as curves
 			curve_session.per_game_toggled_off()
+			_restore_default_context_mode()
 
 
 func _init(
@@ -167,6 +170,15 @@ func _apply_context(saved: Dictionary) -> void:
 		return
 
 	logger.info("Applied per-game config for context '%s'" % active_game_context)
+	store.flush()
+
+
+func _restore_default_context_mode() -> void:
+	var data: Dictionary = store.load_data(hardware_id)
+	var default_entry: Dictionary = data.get("game_curves", {}).get(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, {})
+	var default_mode: String = default_entry.get("mode", "bios")
+	logger.debug("_restore_default_context_mode(): restoring '%s'" % default_mode)
+	mode_manager.set_mode(default_mode)
 	store.flush()
 
 

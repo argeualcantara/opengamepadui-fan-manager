@@ -409,17 +409,14 @@ func test_enabling_toggle_with_game_already_running_applies_immediately() -> voi
 	assert_eq(_engine().get_curve(), {10: 9.0})
 
 
-func test_disabling_toggle_in_bios_mode_leaves_the_previous_context_in_memory() -> void:
-	# _on_curve_session_loaded() deliberately stays gated on
-	# mode == "custom" (see its doc comment): CustomCurveEngine.
-	# load_curve() -> start() unconditionally queues a hardware write
-	# and can restart the poll timer, the same class of real-hardware
-	# bug (pwm_enable flip-back) an earlier fix guarded against for the
-	# commit path — reloading "__default__" while nominally in bios
-	# would reintroduce it. Accepted trade-off: toggling per-game off
-	# while in bios does not reload the engine, it keeps showing
-	# whatever context was last active in memory, until the next real
-	# mode switch to custom re-seeds it from the store.
+func test_disabling_toggle_restores_the_default_contexts_mode_and_curve() -> void:
+	# Regression: toggling per-game off used to only move curve_session
+	# back to "__default__" and reload its curve (gated on already being
+	# in custom mode) - it never re-applied the mode "__default__" was
+	# actually saved in, so leaving per-game while some other context
+	# was in custom mode left the hardware stuck in custom instead of
+	# falling back to whatever "__default__" has (here: custom, but with
+	# a different curve than whatever was last loaded in memory).
 	store.load_data(_test_hardware_id)
 	store.set_game_curve(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, "custom", {_fan_id: {10: 11.0, 20: 22.0}})
 	store.flush()
@@ -432,22 +429,25 @@ func test_disabling_toggle_in_bios_mode_leaves_the_previous_context_in_memory() 
 	manager.per_game_enabled = true
 	manager.per_game_enabled = false
 
-	assert_eq(_engine().get_curve(), {10: 99.0, 20: 99.0}, "reload must not happen outside custom mode")
-	assert_eq(mode_manager.current_mode, "bios", "toggling per-game off must not itself change mode")
+	assert_eq(mode_manager.current_mode, "custom", "toggling per-game off must restore the mode saved for '__default__'")
+	assert_eq(_engine().get_curve(), {10: 11.0, 20: 22.0}, "toggling per-game off must restore the curve saved for '__default__', not whatever was last loaded in memory")
 
 
-func test_disabling_toggle_in_bios_mode_does_not_leave_the_engine_polling() -> void:
-	# FanModeManager.set_mode() is the only place that stops engines,
-	# and it isn't involved in this toggle: confirms toggling per-game
-	# off while in bios can't restart polling by any path.
+func test_disabling_toggle_does_not_restart_polling_when_default_context_is_bios() -> void:
+	# Same restoration as above, but for the common case where
+	# "__default__" itself is saved in bios: must not spuriously start
+	# polling just because the toggle ran.
 	mode_manager.set_mode("custom")
 	mode_manager.set_mode("bios")
+	store.set_game_curve(FanCurveUtils.GLOBAL_DEFAULT_CONTEXT_KEY, "bios", {_fan_id: {10: 5.0, 20: 5.0}})
+	store.flush()
 	assert_true(_engine()._poll_timer.is_stopped(), "sanity check: leaving custom mode already stops the engine")
 
 	manager.per_game_enabled = true
 	manager.per_game_enabled = false
 
-	assert_true(_engine()._poll_timer.is_stopped(), "toggling per-game off in bios mode must not restart polling")
+	assert_eq(mode_manager.current_mode, "bios")
+	assert_true(_engine()._poll_timer.is_stopped(), "toggling per-game off must not restart polling when '__default__' is saved in bios")
 
 
 func test_disabling_toggle_persists() -> void:
