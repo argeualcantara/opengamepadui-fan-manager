@@ -1,7 +1,11 @@
 name: Release
 
-# Every push to main cuts a new patch release: no Conventional Commits
-# needed, the version is just "latest tag + 1 patch". Add
+# Every push to main cuts a new release: no Conventional Commits needed,
+# normally just "latest tag + 1 patch". Bumping plugin.json's
+# major/minor by hand ahead of the tags restarts the series from
+# exactly that value instead (see "Compute next version" below) - that's
+# the only thing plugin.json's version actually controls, it's never
+# committed back here (that would just trigger another release). Add
 # "[skip release]" to a commit message (e.g. a docs-only change) to
 # skip cutting a release for that push.
 on:
@@ -30,20 +34,23 @@ jobs:
         run: |
           git fetch --tags --force
           latest_tag=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          base_version=$(jq -r '.["plugin.version"]' plugin.json)
 
           if [ -z "$latest_tag" ]; then
-            # No release has ever been cut: seed the very first one
-            # straight from plugin.json's declared version, no bump.
-            # Every release after this one bumps the patch of the
-            # previous git tag instead (plugin.json itself is not
-            # read again).
-            base_version=$(jq -r '.["plugin.version"]' plugin.json)
+            # No release exists use the value from plugin.json's 
             new_version="v${base_version}"
             range=""
           else
-            version="${latest_tag#v}"
-            IFS='.' read -r major minor patch <<< "$version"
-            new_version="v${major}.${minor}.$((patch + 1))"
+            IFS='.' read -r tag_major tag_minor tag_patch <<< "${latest_tag#v}"
+            IFS='.' read -r base_major base_minor base_patch <<< "$base_version"
+
+            if [ "$base_major" -gt "$tag_major" ] || { [ "$base_major" -eq "$tag_major" ] && [ "$base_minor" -gt "$tag_minor" ]; }; then
+              # plugin.json's major/minor was bumped
+              # reseting verion patch count
+              new_version="v${base_version}"
+            else
+              new_version="v${tag_major}.${tag_minor}.$((tag_patch + 1))"
+            fi
             range="${latest_tag}..HEAD"
           fi
 
@@ -61,6 +68,11 @@ jobs:
           if [ ! -s release_notes.md ]; then
             echo "No changes." > release_notes.md
           fi
+
+      - name: Sync plugin.json version
+        run: |
+          version="${{ steps.version.outputs.new_version }}"
+          sed -i "s/\"plugin.version\": \"[^\"]*\"/\"plugin.version\": \"${version#v}\"/" plugin.json
 
       - name: Package plugin
         run: make dist
